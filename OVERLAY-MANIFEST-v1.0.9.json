@@ -1,0 +1,82 @@
+{
+  "name": "FlashNextVelocity v1.0.9 MTP HC GroupNorm Incremental Root Overlay",
+  "base": "FlashNextVelocity v1.0.8 root overlay already applied",
+  "runtime_revision": "fnv-mtp-hc-groupnorm-v11",
+  "gufo_commit": "9cad13974cf6da0cd3674b4e0a88b14b7e4a2908",
+  "apply": "Extract directly over the v1.0.8 project root and replace existing files; then run BUILD.bat.",
+  "primary_fix": "MTP nextn_hnorm is independently RMS-normalized per hyper-connection stream in single-session, batched, and scalar-reference paths.",
+  "files": [
+    {
+      "path": "README.md",
+      "v1_0_8_sha256": "8A767F04837083CA1AAB6C56A48B86E37A277EFB83FD87431A9290E7438C90EA",
+      "v1_0_9_sha256": "12B3ADE062A4F24C77EC016FE78DAF01351F4B3761AF573EB1A38E04AC5AE6CD",
+      "size_bytes": 10130
+    },
+    {
+      "path": "VERSION.json",
+      "v1_0_8_sha256": "330F94361D0633A1D6F321BFD4717B1D2CA1591FB9D0871F984FF4E96EF404F9",
+      "v1_0_9_sha256": "04966D3D8D093B02AB67D10E75E53F09010BD8039DFED793C781E950B0826B9F",
+      "size_bytes": 428
+    },
+    {
+      "path": "README-FIRST-v1.0.9.txt",
+      "v1_0_8_sha256": null,
+      "v1_0_9_sha256": "E64C57133D7838F92B3B40534D0F6A6DFEF026212A96E4809076CE7E578E59FF",
+      "size_bytes": 928
+    },
+    {
+      "path": "MTP-HC-GROUPNORM-v1.0.9.md",
+      "v1_0_8_sha256": null,
+      "v1_0_9_sha256": "6DFC97B9A23D465247B45A9CA08CCF79E0466A33D3EE11FB71F34415DEB9058D",
+      "size_bytes": 2162
+    },
+    {
+      "path": "CHANGED-FILES-v1.0.9.txt",
+      "v1_0_8_sha256": null,
+      "v1_0_9_sha256": "CA267E7A90BDE0E508CBF5DB0160345FFDB6EED511F70A1300D0282E8E9CA42D",
+      "size_bytes": 906
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp",
+      "v1_0_8_sha256": "9718B24D1766B82516BB2478C59D9032B4CAD96033B37885853C7ABB3855961C",
+      "v1_0_9_sha256": "75D59C4C1F115D9669D0C1534735A4371043A692D50A6A394EF90E791044D9CA",
+      "size_bytes": 131192
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/batch.cpp",
+      "v1_0_8_sha256": "24A0BD69A26EEC8492E41F5C44F978CE7D9D5A070EF504DF3A903B542C68C6B5",
+      "v1_0_9_sha256": "6B20FFB78F40DF510B035B52C786A3CBC1039471A89775CBE2CB6A36D0E9E915",
+      "size_bytes": 41871
+    },
+    {
+      "path": "scripts/apply-gufo-overlay.ps1",
+      "v1_0_8_sha256": "2E7076C8A8C2151015EB543E17C5898DE81444071E9BD3568703BF7539283084",
+      "v1_0_9_sha256": "9E0F1D83D81110850538A58F0EE9792FAE075A78B8FB4CF81763E3726A6F6563",
+      "size_bytes": 7797
+    },
+    {
+      "path": "scripts/build.ps1",
+      "v1_0_8_sha256": "D1A5562F59B5DE04D107F17DFD2AFFDF9170CCDD4ECC237677F106BE8835435D",
+      "v1_0_9_sha256": "70DA9F80D7340D58F8214FD2A02BC10215237B5C72717C57DBD33C02398A4943",
+      "size_bytes": 25890
+    },
+    {
+      "path": "src/native/main.cpp",
+      "v1_0_8_sha256": "FDAF893FE729363A15549BF474BC30A2C0F95A2114DBD24878191C588279F50F",
+      "v1_0_9_sha256": "379731FBADEE5758541A75FE866591ADE6CC9426D1ED4E15B2270C603475273D",
+      "size_bytes": 98105
+    },
+    {
+      "path": "src/desktop/EngineManager.cs",
+      "v1_0_8_sha256": "7FEC1889C317FA73A68147B448DDCA35CFFD474121C3BBC9A51990153E3E0CAB",
+      "v1_0_9_sha256": "D36411785BA07E54B25A04B34383780953019F2941004C19392580330F8BC204",
+      "size_bytes": 14088
+    },
+    {
+      "path": "VALIDATION-v1.0.9.txt",
+      "v1_0_8_sha256": null,
+      "v1_0_9_sha256": "985ABA36386AF40E905C62312662A868955D9EE87C1193604F68FBC84CCA03CA",
+      "size_bytes": 2324
+    }
+  ]
+}

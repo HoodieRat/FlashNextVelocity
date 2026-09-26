@@ -1,0 +1,23 @@
+FlashNextVelocity v1.0.5 drop-in patch validation
+================================================
+
+Completed before packaging:
+- Unified PATCH.diff applies cleanly to the exact user-supplied v1.0.4 AI-context source bundle.
+- Payload manifest contains 20 changed/new project files and SHA-256 verifies every payload byte.
+- Result of applying PATCH.diff was byte-compared against the finished patched source for all 20 files.
+- git diff --check passed (no whitespace/error markers).
+- VERSION.json and config.example.json parse successfully.
+- Portable native unit tests passed for context lookup and proposal-source profiler accounting.
+- Context lookup was cross-checked against an independent reference implementation over 200,000 randomized cases.
+- Tiny-history, bounded-window, newest-match, minimum-draft and n-gram fallback cases are explicitly tested.
+
+Windows/on-device final gates built into BUILD.bat:
+- Re-applies the project-owned Gufo overlay from a clean pinned Gufo revision.
+- Refuses stale source missing the lookup/recurrent-state/policy-isolation markers.
+- Builds and runs FlashNextVelocityUnitTests.exe with the actual Windows C++ toolchain.
+- Rebuilds the engine from a fresh build tree and verifies runtime revision fnv-context-lookup-economics-v8 is embedded in the EXE.
+- Publishes the Windows desktop app.
+- Runs the existing full runtime self-test when a model is configured.
+
+Environment limitation of this packaging pass:
+- The full gfx1151 Windows HIP/.NET build cannot be executed inside this Linux packaging environment. The real Windows build and model-backed runtime self-test therefore remain intentional install-time gates in BUILD.bat rather than being falsely claimed here.

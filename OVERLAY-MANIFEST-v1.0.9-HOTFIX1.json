@@ -1,0 +1,23 @@
+{
+  "name": "FlashNextVelocity v1.0.9 HOTFIX1 Build Guard Root Overlay",
+  "base": "v1.0.9 MTP HC GroupNorm patch extracted; build may have stopped at sampled-MTP source guard",
+  "runtime_revision": "fnv-mtp-hc-groupnorm-v11 (unchanged)",
+  "changes": "Re-supply known-good mtp_sampling.hpp and replace brittle sampled-MTP Select-String guard with direct marker validation.",
+  "files": [
+    {
+      "path": "BUILD-GUARD-HOTFIX-v1.0.9.txt",
+      "sha256": "09399971287C1A1FCC589CFBE8C5B76024AA8E317BEBD24912D82CE6D8975CF9",
+      "size_bytes": 1216
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/mtp_sampling.hpp",
+      "sha256": "D04AE8AFC0422F8331A2C4328349EEC69FAF056381BB04E815E9AE532EACF450",
+      "size_bytes": 17044
+    },
+    {
+      "path": "scripts/build.ps1",
+      "sha256": "D885E2A3D8F8746133401A838ECE37C9772A4543C63A0121CB3EFBF9831F9E92",
+      "size_bytes": 26336
+    }
+  ]
+}

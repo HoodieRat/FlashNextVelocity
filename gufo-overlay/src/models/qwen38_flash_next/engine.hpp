@@ -1,0 +1,336 @@
+#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
+#define GUFO_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "src/core/sampling.hpp"
+#include "src/core/session_mode.hpp"
+#include "src/models/qwen/tokenizer.hpp"
+#include "src/models/qwen/vision/encoder.hpp"
+#include "src/models/qwen/vision/prompt.hpp"
+#include "src/models/qwen38_flash_next/config.hpp"
+#include "src/models/qwen38_flash_next/context_lookup.hpp"
+#include "src/models/qwen38_flash_next/mtp_policy.hpp"
+#include "src/models/qwen38_flash_next/mtp_sampling.hpp"
+
+namespace gufo::core {
+class GgufReader;
+}
+
+namespace gufo::models::qwen38_flash_next {
+
+struct ModelWeights;
+struct MtpWeights;
+class NgramTable;
+namespace rocm {
+class DeviceModel;
+class Executor;
+class Session;
+}  // namespace rocm
+
+struct ModelOptions {
+  std::uint32_t max_context = 4096;
+  /// Optional MTP draft sidecar (`mtp-...-shared-*.gguf`). Empty leaves
+  /// speculative decoding off.
+  std::string mtp_model_path;
+  /// Maximum proposals per cycle; acceptance history selects the length.
+  std::uint32_t max_draft_tokens = kMaxMtpDraftTokens;
+  /// Real Gufo prefill chunk / executor max_batch. This is not a llama.cpp
+  /// ubatch compatibility knob: it directly sizes the native prefill scratch.
+  std::uint32_t prefill_batch = 2048;
+  /// Proposal semantics for sampled MTP. HaloGreedy restores the older
+  /// halo-box behavior that produced the historical high-acceptance runs.
+  SampledMtpProposalMode sampled_mtp_proposal_mode =
+      SampledMtpProposalMode::kHaloGreedy;
+  std::string vision_model_path;
+  /// Fixed serving capacity used by the calibrated MTP cost model. Keeping
+  /// it independent of scheduler timing preserves seeded request replay.
+  std::uint32_t decode_concurrency = 1;
+  /// Native prompt/context lookup lane. It proposes only text already present
+  /// in the committed context; the target still verifies every proposal.
+  bool context_lookup = true;
+  std::uint32_t context_lookup_min_ngram = 3;
+  std::uint32_t context_lookup_max_ngram = 6;
+  std::uint32_t context_lookup_window = 32768;
+  std::uint32_t context_lookup_min_draft = 2;
+};
+
+class Session;
+class SessionSnapshot;
+
+/// Gufo-owned API over the ROCm runtime: one resident model, any number of
+/// sessions with shared projection batches and independent context state.
+class Model final : public std::enable_shared_from_this<Model> {
+public:
+  ~Model();
+  Model(const Model&) = delete;
+  Model& operator=(const Model&) = delete;
+
+  [[nodiscard]] static std::shared_ptr<Model> Load(
+      const std::string& model_path, const ModelOptions& options,
+      std::string* error_msg = nullptr);
+
+  [[nodiscard]] std::unique_ptr<Session> CreateSession(
+      core::SessionMode mode, std::uint32_t max_context,
+      std::string* error_msg = nullptr);
+
+  [[nodiscard]] std::vector<std::int32_t> Tokenize(std::string_view text) const;
+  [[nodiscard]] std::string Decode(std::span<const std::int32_t> tokens) const;
+  [[nodiscard]] std::string TokenText(std::int32_t token) const;
+  [[nodiscard]] std::int32_t EosToken() const noexcept;
+  [[nodiscard]] bool IsStopToken(std::int32_t token) const noexcept;
+  [[nodiscard]] std::uint32_t VocabSize() const noexcept;
+  [[nodiscard]] std::uint32_t PrefillCapacity() const noexcept;
+  [[nodiscard]] std::uint32_t MaxContext() const noexcept {
+    return options_.max_context;
+  }
+  [[nodiscard]] bool HasMtp() const noexcept;
+  [[nodiscard]] std::uint32_t DecodeConcurrency() const noexcept {
+    return options_.decode_concurrency;
+  }
+  [[nodiscard]] std::string ModelName() const;
+  [[nodiscard]] const Config& config() const noexcept;
+  [[nodiscard]] const tokenization::QwenTokenizer& tokenizer() const noexcept {
+    return *tokenizer_;
+  }
+  [[nodiscard]] std::size_t ResidentBytes() const noexcept;
+  /// Worst-case private device state, including the configured rollback cap.
+  [[nodiscard]] std::size_t SessionBytes(core::SessionMode mode,
+                                         std::uint32_t context) const noexcept;
+  [[nodiscard]] std::size_t DeferredScratchBytes() const;
+  [[nodiscard]] const std::shared_ptr<qwen::vision::Encoder>& VisionEncoder()
+      const noexcept {
+    return vision_;
+  }
+
+private:
+  Model() = default;
+
+  ModelOptions options_;
+  std::shared_ptr<core::GgufReader> reader_;
+  std::shared_ptr<core::GgufReader> mtp_reader_;
+  std::unique_ptr<ModelWeights> weights_;
+  std::unique_ptr<MtpWeights> mtp_weights_;
+  std::unique_ptr<tokenization::QwenTokenizer> tokenizer_;
+  std::unique_ptr<NgramTable> ngram_;
+  std::unique_ptr<rocm::DeviceModel> device_;
+  std::unique_ptr<rocm::Executor> executor_;
+  std::shared_ptr<qwen::vision::Encoder> vision_;
+  MtpBatchController batch_policy_;
+
+  friend class Session;
+};
+
+/// One conversation's context. Sync feeds a prompt (reusing whatever prefix
+/// the session already holds), Evaluate appends one token, DecodeStep
+/// runs a draft-verify cycle. The logits of the last token are kept.
+class Session final {
+public:
+  ~Session();
+  Session(const Session&) = delete;
+  Session& operator=(const Session&) = delete;
+
+  /// Makes the session state equal to `prompt`: keeps the longest common
+  /// prefix with the current tokens, reprocesses the rest.
+  [[nodiscard]] bool Sync(std::span<const std::int32_t> prompt,
+                          std::string* error_msg = nullptr);
+  [[nodiscard]] bool Evaluate(std::int32_t token,
+                              std::string* error_msg = nullptr);
+  struct DecodeResult {
+    std::vector<std::int32_t> tokens;
+    bool stop{false};
+    std::uint32_t drafted{0};
+    std::uint32_t accepted{0};
+    std::uint32_t depth{0};
+    bool lookup{false};
+    std::uint32_t lookup_ngram{0};
+  };
+  /// Greedy decoding verifies deterministic drafts. Sampled decoding can use
+  /// HaloGreedy (deterministic MTP top-token + exact target sample matching)
+  /// or Gufo's stochastic distribution proposal with p/q residual correction.
+  /// History contains only committed tokens. A
+  /// one-token budget or a model without MTP uses ordinary decoding.
+  /// Benchmarks may continue past EOS by setting stop_at_eos to false.
+  [[nodiscard]] bool DecodeStep(std::size_t max_tokens,
+                                sampling::SamplerState& sampler,
+                                DecodeResult* result,
+                                std::string* error_msg = nullptr,
+                                bool stop_at_eos = true);
+  struct BatchOutcome {
+    bool completed{false};
+    std::string error{};
+  };
+  struct DecodeRequest {
+    Session* session;
+    std::size_t max_tokens;
+    sampling::SamplerState* sampler;
+    DecodeResult* result;
+    bool stop_at_eos{true};
+    BatchOutcome* outcome{nullptr};
+  };
+  /// A false return may include completed peers. Inspect each outcome; only
+  /// sessions whose persistent state was partly mutated become invalid.
+  [[nodiscard]] static bool DecodeBatch(std::span<const DecodeRequest> requests,
+                                        std::string* error_msg = nullptr);
+  struct AdvanceRequest {
+    Session* session;
+    std::int32_t token;
+    BatchOutcome* outcome{nullptr};
+  };
+  [[nodiscard]] static bool EvaluateBatch(
+      std::span<const AdvanceRequest> requests,
+      std::string* error_msg = nullptr);
+  [[nodiscard]] std::span<const float> Logits() const noexcept {
+    return valid_ ? std::span<const float>(logits_) : std::span<const float>{};
+  }
+  [[nodiscard]] std::uint32_t Position() const noexcept;
+  [[nodiscard]] std::uint32_t ContextSize() const noexcept;
+  [[nodiscard]] std::span<const std::int32_t> Tokens() const noexcept {
+    return valid_ ? std::span<const std::int32_t>(tokens_)
+                  : std::span<const std::int32_t>{};
+  }
+  void Reset();
+  /// Cancellation is checked at model, layer and snapshot-copy boundaries.
+  void SetCancellationCheck(std::function<bool()> check);
+  [[nodiscard]] bool IsValid() const noexcept { return valid_; }
+  [[nodiscard]] std::size_t AllocatedBytes() const noexcept;
+  void ConfigureVision(std::shared_ptr<const qwen::vision::Prompt> prompt);
+  /// A new request reusing cached context starts its own acceptance history.
+  void ResetDraftPolicy() noexcept { draft_length_.Reset(); }
+  /// Sampled MTP stops extending a chain when a proposal falls below this
+  /// probability. 0 keeps the previous behavior. Greedy drafts ignore it.
+  void SetDraftConfidence(float minimum) noexcept {
+    draft_confidence_ = minimum < 0.0F ? 0.0F : (minimum > 1.0F ? 1.0F : minimum);
+  }
+  [[nodiscard]] std::uint64_t MtpFreshResets() const noexcept;
+
+  struct SpeculativeStats {
+    std::uint64_t cycles{0};
+    std::uint64_t drafted{0};
+    std::uint64_t accepted{0};
+    std::uint64_t low_confidence_stops{0};
+    std::uint64_t compact_frontier_samples{0};
+    std::uint64_t compact_frontier_fallbacks{0};
+    std::uint64_t retained_frontier_downloads{0};
+    std::uint64_t async_halo_chains{0};
+    std::uint64_t async_halo_draft_tokens{0};
+    std::uint64_t mtp_cycles{0};
+    std::uint64_t mtp_drafted{0};
+    std::uint64_t mtp_accepted{0};
+    std::uint64_t mtp_confidence_samples{0};
+    double mtp_confidence_sum{0.0};
+    std::uint64_t lookup_cycles{0};
+    std::uint64_t lookup_drafted{0};
+    std::uint64_t lookup_accepted{0};
+    std::uint64_t lookup_ngram_sum{0};
+    std::uint64_t lookup_distance_sum{0};
+  };
+  [[nodiscard]] const SpeculativeStats& Statistics() const noexcept {
+    return stats_;
+  }
+
+  /// Compatibility version; bump on payload or inference arithmetic changes.
+  static constexpr std::uint32_t kSnapshotPayloadVersion = 14;
+  /// Bytes a snapshot of the current context occupies.
+  [[nodiscard]] std::uint64_t SnapshotBytes() const;
+  /// Captures the whole context (tokens, device caches and recurrent
+  /// state, draft-block state, last logits) into host memory. The
+  /// speculative length controller is preserved for stochastic replay.
+  [[nodiscard]] std::unique_ptr<SessionSnapshot> SaveSnapshot(
+      std::string* error_msg = nullptr) const;
+  /// Replaces this session's context with a snapshot of the same model.
+  /// Image snapshots require ConfigureVision with the matching immutable
+  /// prompt first; pixel data is not serialized. Text snapshots clear images.
+  [[nodiscard]] bool RestoreSnapshot(const SessionSnapshot& snapshot,
+                                     std::string* error_msg = nullptr);
+  [[nodiscard]] bool RestoreSnapshot(std::span<const std::uint8_t> payload,
+                                     std::string* error_msg = nullptr);
+
+private:
+  friend class Model;
+  Session(std::shared_ptr<Model> model, std::unique_ptr<rocm::Session> session);
+
+  bool Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
+            bool prefill = false);
+  /// Trunk rows the draft block may still read: [hidden_base_, size).
+  [[nodiscard]] std::uint32_t KeptHiddenRows() const noexcept;
+  bool DraftCatchUp(std::int32_t next_token, bool propose,
+                    std::string* error_msg,
+                    MtpCandidateLogits* candidates = nullptr);
+  bool DraftReplay(std::int32_t next_token, std::vector<std::int32_t>* replay,
+                   std::int32_t* hidden_row, std::string* error_msg) const;
+  static bool DraftCatchUpBatch(std::span<const AdvanceRequest> requests,
+                                std::string* error_msg);
+  template<class Request>
+  static bool RunIsolatedBatch(std::span<const Request> requests,
+                               std::string* error_msg);
+  static bool DecodeBatchImpl(std::span<const DecodeRequest> requests,
+                              std::string* error_msg);
+  static bool EvaluateBatchImpl(std::span<const AdvanceRequest> requests,
+                                std::string* error_msg);
+  struct PendingDecode;
+  bool PrepareDecode(const DecodeRequest& request, PendingDecode* pending,
+                     std::string* error_msg, bool defer_head = false,
+                     std::optional<std::uint32_t> batch_drafts = {});
+  static void AppendDraft(PendingDecode& pending);
+  bool DropLowConfidenceDraft(PendingDecode& pending);
+  bool FinishDecode(const DecodeRequest& request, const PendingDecode& pending,
+                    std::string* error_msg);
+
+  std::shared_ptr<Model> model_;
+  std::unique_ptr<rocm::Session> session_;
+  std::vector<std::int32_t> tokens_;
+  std::vector<float> logits_;
+  std::int32_t draft_token_{0};
+  std::vector<float> verify_logits_;
+  std::uint32_t hidden_base_{0};  ///< first position whose hidden row is kept
+  MtpLengthController draft_length_;
+  float draft_confidence_{0.0F};
+  SpeculativeStats stats_;
+  // Performance-only cache of the raw Top-64/128/256 from the current target
+  // frontier. The full frontier stays authoritative in the executor's
+  // session-owned GPU buffer and is downloaded only for a certificate fallback
+  // or snapshot; the compact cache avoids routine full-vocabulary D2H traffic.
+  MtpVerificationCandidateLogits frontier_candidates_{};
+  bool frontier_candidates_valid_{false};
+  std::vector<std::uint8_t> image_identity_;
+  bool valid_{true};
+  [[nodiscard]] bool MtpEnabled() const noexcept;
+};
+
+/// Immutable host copy of a session context. The same bytes restore in
+/// memory and persist to disk.
+class SessionSnapshot final {
+public:
+  ~SessionSnapshot() = default;
+  SessionSnapshot(const SessionSnapshot&) = delete;
+  SessionSnapshot& operator=(const SessionSnapshot&) = delete;
+  SessionSnapshot(SessionSnapshot&&) = delete;
+  SessionSnapshot& operator=(SessionSnapshot&&) = delete;
+
+  [[nodiscard]] std::uint64_t SizeBytes() const noexcept { return size_; }
+  [[nodiscard]] std::span<const std::uint8_t> bytes() const noexcept {
+    return {data_.get(), size_};
+  }
+  [[nodiscard]] bool CopyTo(std::span<std::uint8_t> destination) const noexcept;
+
+private:
+  explicit SessionSnapshot(std::uint64_t size);
+
+  std::unique_ptr<std::uint8_t[]> data_;
+  std::uint64_t size_{0};
+
+  friend class Session;
+};
+
+}  // namespace gufo::models::qwen38_flash_next
+
+#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_

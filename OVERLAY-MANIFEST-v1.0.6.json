@@ -1,0 +1,103 @@
+{
+  "name": "FlashNextVelocity v1.0.6 Halo-Greedy MTP Recovery Overlay",
+  "base": "user-supplied FlashNextVelocity Studio AI Context bundle 2026-09-25 18:20:07",
+  "runtime_revision": "fnv-halo-greedy-mtp-recovery-v9",
+  "files": [
+    {
+      "path": "README.md",
+      "baseline_sha256": "BFD59AF7CFC9D866EB7BCBB2C3D111E986D2227E6637D6000E00136C3B6B5B68",
+      "patched_sha256": "6383548A4A83C15239053EC2A834684512C8F465B5ACDCA50F3C04B545241993",
+      "size_bytes": 8316
+    },
+    {
+      "path": "VERSION.json",
+      "baseline_sha256": "E9D4EF7C7D2B9CDEB9CF5CE1A04B8B129A672DB68749B24B51D6CC54672070CD",
+      "patched_sha256": "AC5D96C1245C10B4427CBEBB83A7BC67C1B2FDF2EE14187C8A05D6B849A2DD25",
+      "size_bytes": 359
+    },
+    {
+      "path": "config.example.json",
+      "baseline_sha256": "E6D69EDEE6388FC163B2FDA04BA02C3A2B8E8C7C3EF9DC657E58425DD021698A",
+      "patched_sha256": "2E439F01456654FF080443BE3CD7FFF2A6732B7D8F491479EE61E7EA4321DA1E",
+      "size_bytes": 997
+    },
+    {
+      "path": "OPTIMIZATION-PASS-v1.0.6.md",
+      "baseline_sha256": null,
+      "patched_sha256": "4A538A74C1C06BBCA2E2AE9EB9B98A7840D03867F1EAD6661167F2975076195C",
+      "size_bytes": 3576
+    },
+    {
+      "path": "scripts/build.ps1",
+      "baseline_sha256": "4B220E846801EA64637A6C40D38D8B3259E9E6DDA0CA2FA534B9DE2E15A07FEF",
+      "patched_sha256": "59C7712F0D4D7EFF111FC48B8A8BA9523A45D1A07C44F88683C2D9FF7B466CCB",
+      "size_bytes": 24274
+    },
+    {
+      "path": "tests/native_unit_tests.cpp",
+      "baseline_sha256": "6AD81D42DB870C5DF0F8A1BF72AAE5BE93AA1B857C0D0B759714CEAB8A1C9A8B",
+      "patched_sha256": "37F332270074AEA76610C441DB079150FA344C27E660D1F8B83E810B0F4CC74E",
+      "size_bytes": 5826
+    },
+    {
+      "path": "src/native/main.cpp",
+      "baseline_sha256": "23646B50960760A86D0046CC9D3F086C55E72DF31709450DB94A9FE3303DD4B2",
+      "patched_sha256": "D0B07050BCD07B1CC9C663B11D1676A0FB35D24D86C0FB2EEEAB7CC0B5A95B2C",
+      "size_bytes": 96558
+    },
+    {
+      "path": "src/desktop/FlashNextVelocity.Desktop.csproj",
+      "baseline_sha256": "DE20FC8BA505AE854D34512C200B9D7DCEAA9E80FFF3F3AA4184786DFF7CA511",
+      "patched_sha256": "4BDBE388A99C2E16C036245A26F92B90BE2B14DA8ED98BB837CEC8FE6CB339F9",
+      "size_bytes": 567
+    },
+    {
+      "path": "src/desktop/EngineManager.cs",
+      "baseline_sha256": "BC293FDBCC098F0B03D7BA2194FD6ED9ECB60974BD57308B2CE44DFCB9CE4D9F",
+      "patched_sha256": "4884BD7FC737A5E3876ECADEF1DB58683BE74F7E1C061FC64DDC6F7111BAF164",
+      "size_bytes": 14095
+    },
+    {
+      "path": "src/desktop/EngineConfig.cs",
+      "baseline_sha256": "A1077AE83BB813A5BCBC4738458AA39A27CDA4505444E8600925815329A13B06",
+      "patched_sha256": "05E0C642121D3A6BEA02A0E88B51FF605CA853FC6E60EFCDC98CC101BBE04DAE",
+      "size_bytes": 12870
+    },
+    {
+      "path": "src/desktop/app.manifest",
+      "baseline_sha256": "0343083E9D068861202518DC6A6027D65279E84C0D7F62D87B84B8DCC3D04FF3",
+      "patched_sha256": "60168215BDB1D27585AF86B5A0A0F582B0035998A65735C7D577DF581BBD0A58",
+      "size_bytes": 563
+    },
+    {
+      "path": "src/desktop/ApiClient.cs",
+      "baseline_sha256": "C22CA7811A167FD392E8228D21E42D032191659E626F508504C05CF9C98B6D7E",
+      "patched_sha256": "3F88F644121AB21AA67E58B76BFC9C9623199D8AA2487A96978396BAE6A3E573",
+      "size_bytes": 8230
+    },
+    {
+      "path": "src/desktop/MainForm.cs",
+      "baseline_sha256": "7F5EA486A3B7E459350CC7CEAA3639996ED3BEAAEF54630D5579AAF388CD740F",
+      "patched_sha256": "17E86536433ABC260C18976EB702D0D649E11EBA47BF99301FFEA6F13ED154FB",
+      "size_bytes": 29439
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/mtp_sampling.hpp",
+      "baseline_sha256": "07A9859DE30570E6471AFA94122A4522DFBC1912B0BB0E65DC2DC9FF240AEB33",
+      "patched_sha256": "F34D4DA2BBD1F18499484907A322177C9F7F822BE3917005B3185096900BE370",
+      "size_bytes": 16095
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.cpp",
+      "baseline_sha256": "F6C86265F4F376BAC119156B1C04754F07AEB55D1463F346E29750F5257FF73F",
+      "patched_sha256": "3A25996E50B552AD91F1C31D54E253FD4EBB5B11EC73DE10DCA1094524330EC6",
+      "size_bytes": 56718
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.hpp",
+      "baseline_sha256": "C4740B2DB4A17A6F969A6E88A93F8FF79EDC245C556214EC1E9B63CBA39AD88E",
+      "patched_sha256": "99680A292A2D7FB02C5F3E46EE2E1978695FD1224494D71776F7E68FBDDA4EF2",
+      "size_bytes": 14025
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "schema": "flashnextvelocity-dropin-patch-v1",
+  "patch_name": "FlashNextVelocity v1.0.5 Strix Native Integration",
+  "patch_version": "1.0.5",
+  "expected_base_version": "1.0.4",
+  "runtime_revision": "fnv-context-lookup-economics-v8",
+  "created": "2026-09-25T16:57:41-06:00",
+  "files": [
+    {
+      "path": "CMakeLists.txt",
+      "action": "replace",
+      "base_sha256": "5817704495D68670D518F9C874A45FD9A22213E4E77DE379385F7BAA148C736C",
+      "payload_sha256": "BDC562230CAA8BF015BA77D1C9B2240BDF28305A7BB71AA0F947DCD39FC126FC",
+      "size_bytes": 5282
+    },
+    {
+      "path": "README.md",
+      "action": "replace",
+      "base_sha256": "072D870DC44D9CD34C5877FC756EFC38D975C41BD353E35055A7A57C59E71BBE",
+      "payload_sha256": "BFD59AF7CFC9D866EB7BCBB2C3D111E986D2227E6637D6000E00136C3B6B5B68",
+      "size_bytes": 7782
+    },
+    {
+      "path": "README.txt",
+      "action": "replace",
+      "base_sha256": "ADE868AC28353BBBA911B80B4A31A0A6FC460FEA42F5A945A795B24B4406313F",
+      "payload_sha256": "7512C01CE1DD4199B8303463D7C94322FFCBFCA93D5DE773FDD77E6A9AA68C00",
+      "size_bytes": 681
+    },
+    {
+      "path": "STRIX-ALLOY-NATIVE-INTEGRATION-README.txt",
+      "action": "add",
+      "base_sha256": null,
+      "payload_sha256": "4CE9DB51345E28F4319EA85C16863B17878F9359E20CD5698846284A0EBDEFA8",
+      "size_bytes": 2336
+    },
+    {
+      "path": "THIRD_PARTY.md",
+      "action": "replace",
+      "base_sha256": "CAB03050DBA2E08A97A0C188C098FB359747D6CAC290738BE8A88F0B5AB37F45",
+      "payload_sha256": "BB43C87EB2D97C705E06FA0B6CD3839AD7254A75220FF3EA7F5128B8AABAF0CC",
+      "size_bytes": 1308
+    },
+    {
+      "path": "VERSION.json",
+      "action": "replace",
+      "base_sha256": "06C09FE61F7B82B7D9D74734B6158208486CA87738B755DFD00E11181B0A7375",
+      "payload_sha256": "E9D4EF7C7D2B9CDEB9CF5CE1A04B8B129A672DB68749B24B51D6CC54672070CD",
+      "size_bytes": 297
+    },
+    {
+      "path": "config.example.json",
+      "action": "replace",
+      "base_sha256": "3111211C60C409BBCF0608D6AE6FA3445E91BD6AAE18FA4B06E97EA8A104225E",
+      "payload_sha256": "E6D69EDEE6388FC163B2FDA04BA02C3A2B8E8C7C3EF9DC657E58425DD021698A",
+      "size_bytes": 934
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/context_lookup.hpp",
+      "action": "add",
+      "base_sha256": null,
+      "payload_sha256": "86BA984044B66DF11AF5E6E0DA13E566ED75A11E910B0F3703BC7149031DBAFE",
+      "size_bytes": 3667
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.cpp",
+      "action": "replace",
+      "base_sha256": "66BF606F457264B96F8005F4978C4976E0EAD51FAA34F13B216220970DD77609",
+      "payload_sha256": "F6C86265F4F376BAC119156B1C04754F07AEB55D1463F346E29750F5257FF73F",
+      "size_bytes": 53474
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.hpp",
+      "action": "replace",
+      "base_sha256": "445F1A9A1FB070F3C6D4C0FD35869188DB7DBD961612C22A99AA1474C0684F78",
+      "payload_sha256": "C4740B2DB4A17A6F969A6E88A93F8FF79EDC245C556214EC1E9B63CBA39AD88E",
+      "size_bytes": 13512
+    },
+    {
+      "path": "scripts/build.ps1",
+      "action": "replace",
+      "base_sha256": "4289C2A76A4C15CA055658636FD6174B9E7DF2EEFFD9812628D625B246AB6A58",
+      "payload_sha256": "4B220E846801EA64637A6C40D38D8B3259E9E6DDA0CA2FA534B9DE2E15A07FEF",
+      "size_bytes": 23546
+    },
+    {
+      "path": "src/desktop/ApiClient.cs",
+      "action": "replace",
+      "base_sha256": "11B777C839B6995DE3A546ED770C5C41C865E973C8DC44BCDA184F6BF82CD4C7",
+      "payload_sha256": "C22CA7811A167FD392E8228D21E42D032191659E626F508504C05CF9C98B6D7E",
+      "size_bytes": 7990
+    },
+    {
+      "path": "src/desktop/EngineConfig.cs",
+      "action": "replace",
+      "base_sha256": "BCC6427CC10D165843BD2EBCDAC611611C04FC9096E3D9C735719D760D765A2A",
+      "payload_sha256": "A1077AE83BB813A5BCBC4738458AA39A27CDA4505444E8600925815329A13B06",
+      "size_bytes": 12055
+    },
+    {
+      "path": "src/desktop/EngineManager.cs",
+      "action": "replace",
+      "base_sha256": "CF96299426EADC343659A7C6C9BB302385DCC127D9BC92AAAE30CF63CCDF3C05",
+      "payload_sha256": "BC293FDBCC098F0B03D7BA2194FD6ED9ECB60974BD57308B2CE44DFCB9CE4D9F",
+      "size_bytes": 13735
+    },
+    {
+      "path": "src/desktop/FlashNextVelocity.Desktop.csproj",
+      "action": "replace",
+      "base_sha256": "5FD5CEC7DFDEA94752A5E4284A755738F360F755067F6DCC213616D9FF62D4C5",
+      "payload_sha256": "DE20FC8BA505AE854D34512C200B9D7DCEAA9E80FFF3F3AA4184786DFF7CA511",
+      "size_bytes": 567
+    },
+    {
+      "path": "src/desktop/MainForm.cs",
+      "action": "replace",
+      "base_sha256": "60F0304BC0FAFC585E3E316943570C525DE54E8B69BC0A0AC59330110C3279F2",
+      "payload_sha256": "7F5EA486A3B7E459350CC7CEAA3639996ED3BEAAEF54630D5579AAF388CD740F",
+      "size_bytes": 28488
+    },
+    {
+      "path": "src/desktop/app.manifest",
+      "action": "replace",
+      "base_sha256": "C11D142052FC4D1C20552B8A95C46D6221E45EEFEC28AC1ABBA400AB04EB2EA0",
+      "payload_sha256": "0343083E9D068861202518DC6A6027D65279E84C0D7F62D87B84B8DCC3D04FF3",
+      "size_bytes": 563
+    },
+    {
+      "path": "src/native/bench_profile.hpp",
+      "action": "replace",
+      "base_sha256": "D608AD9B728A98D261776063FFAB37F1DA810C2C13359931B92493EFA591B7F2",
+      "payload_sha256": "471AEAA5C840E923EC926A9F6FDF9F9A5FCACAAD0AF366A4896194C4919996BF",
+      "size_bytes": 30355
+    },
+    {
+      "path": "src/native/main.cpp",
+      "action": "replace",
+      "base_sha256": "5AB7B71F688F1E1FA27959EC46A55495842B053DEEDB2BDBDAD23FB5F574FF80",
+      "payload_sha256": "23646B50960760A86D0046CC9D3F086C55E72DF31709450DB94A9FE3303DD4B2",
+      "size_bytes": 93661
+    },
+    {
+      "path": "tests/native_unit_tests.cpp",
+      "action": "add",
+      "base_sha256": null,
+      "payload_sha256": "6AD81D42DB870C5DF0F8A1BF72AAE5BE93AA1B857C0D0B759714CEAB8A1C9A8B",
+      "size_bytes": 4601
+    }
+  ]
+}

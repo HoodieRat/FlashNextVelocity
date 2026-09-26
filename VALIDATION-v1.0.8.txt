@@ -1,0 +1,18 @@
+FlashNextVelocity v1.0.8 validation record
+
+Validated in this environment:
+- VERSION.json parses successfully.
+- src/desktop/FlashNextVelocity.Desktop.csproj parses as XML.
+- src/desktop/app.manifest parses as XML.
+- Native portable unit tests compile under C++23 and pass. A tiny test-only compatibility shim was used for Windows CRT _dupenv_s; project source was not changed for Linux.
+- Added deferred-frontier telemetry regression test passes.
+- Structural source gates confirm the unconditional compact-verification full-frontier download is absent, lazy MaterializeDeferredFrontier is present, and rejection-frontier handling remains present.
+- Live ROCm helper contains no hard-coded C:\flashfknworkalready dependency.
+- Benchmark PowerShell script passed delimiter/string static sanity checks and uses no PowerShell-7 ternary syntax.
+- Root-overlay ZIP was reapplied to a clean copy of the uploaded baseline and every payload file was hash-compared to the staged patched tree.
+
+Not executable here:
+- Windows-native MSVC/ROCm gfx1151 build.
+- Real Ryzen AI Max+ 395 / Radeon 8060S performance benchmark.
+
+Therefore no new token/s number is claimed. Run BUILD.bat on the target Windows machine, then BENCHMARK-TOP-WINS.bat for the real A/B measurement.

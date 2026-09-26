@@ -1,0 +1,7 @@
+FlashNextVelocity Studio v1.0.2 runtime startup fix
+
+- Native and desktop builds were already succeeding in v1.0.1.
+- Bundles the selected ROCm bin DLLs beside FlashNextVelocity.Engine.exe during BUILD.
+- Replaces Start-Process self-test diagnostics with System.Diagnostics.Process and guaranteed numeric/hex exit reporting.
+- Desktop logs numeric + NTSTATUS-style hex exit codes too.
+- Reuses existing Gufo/vcpkg/ROCm/build output; no dependency reinstall should be needed.

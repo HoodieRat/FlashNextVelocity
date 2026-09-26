@@ -1,0 +1,35 @@
+FlashNextVelocity Thinking + Effective Settings Telemetry Patch
+Date: 2026-09-25
+
+Apply:
+1. Extract this ZIP directly over:
+   C:\FlashNextVelocity-Studio-v1.0.0\FlashNextVelocity-Studio-v1.0.0
+2. Replace the three source files when prompted.
+3. Run BUILD.bat.
+4. Run the rebuilt dist\FlashNextVelocity.exe.
+
+Changes:
+- Thinking checkbox is the Studio master switch.
+- Thinking OFF explicitly sends enable_thinking=false from desktop Quick Chat and Benchmark.
+- Reasoning effort and Preserve Thinking controls are disabled while Thinking is OFF, but their preferences remain saved.
+- Thinking ON explicitly sends the selected reasoning effort.
+- Built-in browser dashboard Quick Chat and Benchmark also send explicit effective reasoning/sampling settings.
+- Benchmark no longer hard-codes thinking OFF or hard-coded sampling values.
+- Added Active config path + Open Config in Settings. Config remains next to the EXE (dist\config.json).
+- /health now exposes runtime reasoning and sampling defaults used by the browser dashboard.
+- /metrics now includes effective_settings for the actual last request.
+- Benchmark profile and Last Request text now print:
+  Thinking, Reasoning effort, Temperature, Top P, Top K, Min P,
+  Repeat penalty, Repeat last N, MTP draft max, MTP draft confidence, Context.
+- Native request parsing now accepts repeat_last_n overrides so telemetry can report the actual value used.
+
+Expected OFF report:
+Thinking: OFF
+Reasoning effort: OFF
+
+Expected ON report:
+Thinking: ON
+Reasoning effort: low|medium|xhigh
+
+Validation note:
+The source paths and request/telemetry wiring were source-validated in the supplied context bundle. This environment does not contain the Windows/.NET/ROCm build toolchain, so BUILD.bat must perform the actual Windows compile/runtime validation on the target machine.

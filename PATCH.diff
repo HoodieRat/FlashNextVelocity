@@ -1,0 +1,1877 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 93f812f..e155893 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -96,6 +96,16 @@ if(TARGET gufo_qwen38_flash_next_mmq)
+   target_compile_definitions(gufo_qwen38_flash_next_mmq PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+ endif()
+ 
++
++add_executable(FlashNextVelocityUnitTests tests/native_unit_tests.cpp)
++target_include_directories(FlashNextVelocityUnitTests PRIVATE
++  ${GUFO_ROOT}
++  ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
++target_compile_definitions(FlashNextVelocityUnitTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
++target_compile_options(FlashNextVelocityUnitTests PRIVATE -O2)
++set_target_properties(FlashNextVelocityUnitTests PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++
+ add_executable(FlashNextVelocityEngine src/native/main.cpp)
+ target_include_directories(FlashNextVelocityEngine PRIVATE ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+ target_compile_definitions(FlashNextVelocityEngine PRIVATE ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+diff --git a/README.md b/README.md
+index d3f07eb..69e0cf0 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# FlashNextVelocity Studio 1.0.3
++# FlashNextVelocity Studio 1.0.5
+ 
+ A Windows desktop/tray application and native `gfx1151` inference server for Qwen3.8-Flash-Next on AMD Strix Halo.
+ 
+@@ -10,8 +10,8 @@ This package is a **clean project**, not a hotfix overlay. It does not contain t
+ - `FlashNextVelocity.Engine.exe`: native Gufo-derived HIP inference engine, managed by the desktop app.
+ - OpenAI-compatible API at `http://127.0.0.1:8080/v1`.
+ - Browser dashboard at `http://127.0.0.1:8080/` with quick chat and benchmark controls.
+-- Desktop settings for model, MTP, vision, context, draft depth, sampling and server port.
+-- Desktop benchmark page with prefill tok/s, decode tok/s, MTP acceptance and 64-token decode windows.
++- Desktop settings for model, MTP, native context lookup, Windows memory guard, vision, context, draft depth, sampling and server port.
++- Desktop benchmark page with prefill tok/s, decode tok/s, MTP-only acceptance, lookup acceptance, per-position survival/economics and 64-token decode windows.
+ - Logs page and persistent engine logs.
+ - System-tray Start / Stop / Restart / Open Dashboard controls.
+ - Optional Start with Windows.
+@@ -131,6 +131,17 @@ The source/dependency/build trees can remain in place because the local ROCm run
+ Gufo is MIT licensed and pinned to the commit listed in `VERSION.json`. See `THIRD_PARTY.md` and `LICENSE`.
+ 
+ 
++
++## v1.0.5 native speculative integration
++
++This release adds a Windows-native prompt/context lookup proposal lane beside MTP. When the newly sampled target token completes a strong n-gram already present in committed context, Studio copies the historical continuation as a speculative proposal and verifies it through the existing Gufo target/rollback path. The MTP recurrent block still receives a headless catch-up so its state remains valid, but its proposal/output-head work is skipped for that lookup-selected cycle. If no qualifying match exists, generation falls through to the normal MTP path. Lookup width is independent of the MTP length learner because the two proposal sources have different costs.
++
++Sampled decoding remains distribution-correct: each lookup token is represented as a deterministic one-hot proposal distribution and is passed through the same target p/q rejection plus residual-correction verifier used by sampled MTP. Lookup outcomes do not train the MTP draft-length policy. Metrics separately report MTP and lookup drafted/accepted counts and prefix survival.
++
++A configurable Windows memory floor is also checked before/after model load, at request start, and periodically during generation. The guard checks both available physical RAM and commit headroom; the default floor is 8 GiB. It is a safety guard only; it does not change VGM or expose additional VRAM.
++
++The integration is fully native Windows. No WSL2, DXG bridge, Linux `/proc`/`mmap` hooks, acceptance-EMA draft controller, experimental reduced-vocabulary MTP conversion, or no-gain 512-expert routing patch is imported.
++
+ ## v1.0.4 ROCm ownership / hipBLASLt fix
+ 
+ Studio now owns `.deps\rocm` inside the project. `RUN.bat` performs a one-time migration from an older ROCm install when needed. The hipBLASLt environment is pointed at the architecture-specific `bin\hipblaslt\library\gfx1151` directory, where `TensileLibrary_lazy_gfx1151.*` and gfx1151 code objects live.
+diff --git a/README.txt b/README.txt
+index c8a6ce6..f7780f5 100644
+--- a/README.txt
++++ b/README.txt
+@@ -1,19 +1,15 @@
+-FlashNextVelocity Studio v1.0.4.2 lock fix
++FlashNextVelocity Studio v1.0.5
+ 
+-Fixes the one-time standalone ROCm migration when an already-running Studio/engine process holds amdhip64_7.dll or another ROCm runtime DLL open.
++Native Strix/Halogen-inspired integration for the existing Gufo Windows runtime:
++- context/prompt lookup speculative proposals with exact target verification
++- MTP-only and lookup-only acceptance telemetry
++- per-position survival and per-depth proposal/verification economics
++- configurable Windows physical-RAM + commit-headroom guard
++- runtime/config revision checks so stale binaries are rejected
+ 
+-The 8.116 GB ROCm copy from the previous run already completed. This patch does not force that copy to repeat.
++Build/install:
++1. Put the project at a short path such as C:\FlashNextVelocity.
++2. Run BUILD.bat.
++3. Launch with RUN.bat after the validated build completes.
+ 
+-Install:
+-1. Exit Studio if it is visible (the script will also force-stop stale Studio/engine processes).
+-2. Extract this ZIP over your existing project root.
+-3. Replace the included RUN.bat and scripts\ensure-local-rocm.ps1.
+-4. Run RUN.bat.
+-
+-Expected:
+-- project-local .deps\rocm is reused
+-- existing Studio/engine processes are stopped
+-- runtime DLLs are synchronized into dist\engine
+-- dist\runtime.json is rewritten to the project-local ROCm path
+-- hipBLASLt path points to ...\bin\hipblaslt\library\gfx1151
+-- Studio launches
++See STRIX-ALLOY-NATIVE-INTEGRATION-README.txt for the integration details and settings.
+diff --git a/STRIX-ALLOY-NATIVE-INTEGRATION-README.txt b/STRIX-ALLOY-NATIVE-INTEGRATION-README.txt
+new file mode 100644
+index 0000000..8707122
+--- /dev/null
++++ b/STRIX-ALLOY-NATIVE-INTEGRATION-README.txt
+@@ -0,0 +1,56 @@
++FlashNextVelocity v1.0.5 - native Strix Alloy / Halogen ideas integration
++
++Implemented
++-----------
++1. Native context-lookup speculative proposal lane.
++   - Windows-native, no WSL/DXG/Linux hooks.
++   - Searches committed context for the longest recent matching n-gram.
++   - Reuses the existing Gufo target verification + rollback path.
++   - Keeps the MTP recurrent block synchronized with a headless catch-up, but
++     skips MTP proposal/head work for lookup-selected cycles.
++   - Sampled decoding remains exact: lookup uses a one-hot proposal q and the
++     existing p/q rejection + residual correction verifier.
++   - Automatically falls back to normal MTP when no strong lookup match exists.
++
++2. MTP economics telemetry.
++   - MTP-only acceptance is separated from lookup acceptance.
++   - Proposed width/round, emitted yield/round, target verify ms/round,
++     target verify ms/output token.
++   - Prefix survival by draft position.
++   - Per-depth proposal/verification economics.
++
++3. Windows memory guard.
++   - Checks both available physical RAM and Windows commit headroom before load,
++     after load, at request start, and periodically during generation.
++   - Default floor: 8 GiB, configurable in Studio/settings.
++   - This is a safety floor, not a VRAM-unlock mechanism.
++
++4. Studio/config integration.
++   - Context lookup and memory guard are first-class persisted settings.
++   - /health exposes the active values so stale config cannot silently run.
++   - Benchmark MTP acceptance now reports MTP-only acceptance; lookup metrics
++     remain separately visible in the full report/JSON.
++
++Defaults
++--------
++context_lookup: true
++context_lookup_min_ngram: 3
++context_lookup_max_ngram: 6
++context_lookup_window: 32768
++context_lookup_min_draft: 2
++memory_guard: true
++memory_guard_min_available_gib: 8.0
++
++Intentionally not imported
++--------------------------
++- WSL2, DXG bridge, Linux mmap/proc hooks.
++- Acceptance-EMA adaptive draft sizing (published negative result).
++- 512-expert routing fast path (published near-zero result with HIP graphs).
++- Reduced-vocabulary MTP head conversion. The published experimental path
++  faulted during expansion and your current shared Q8_0 sidecar does not carry
++  the required d2t/t2d mapping.
++
++Build
++-----
++Run BUILD.bat. The build script now requires runtime revision:
++  fnv-context-lookup-economics-v8
+diff --git a/THIRD_PARTY.md b/THIRD_PARTY.md
+index 3327abf..2e5567e 100644
+--- a/THIRD_PARTY.md
++++ b/THIRD_PARTY.md
+@@ -8,7 +8,7 @@ Pinned revision: `9cad13974cf6da0cd3674b4e0a88b14b7e4a2908`
+ 
+ License: MIT. The bootstrap retains Gufo's `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, and `licenses/` files in `.deps/gufo`.
+ 
+-FlashNextVelocity uses Gufo's Qwen3.8 Flash-Next engine, MTP policy, Qwen tokenizer/template/vision path, HIP kernels, and MMQ-derived kernel package. The Windows project changes platform I/O/mapping/network integration only.
++FlashNextVelocity uses Gufo's Qwen3.8 Flash-Next engine, MTP policy, Qwen tokenizer/template/vision path, HIP kernels, and MMQ-derived kernel package. Project-owned integration adds Windows platform I/O/mapping/network support plus sampled-MTP verification, profiling, and native context-lookup proposal logic on top of the pinned Gufo base.
+ 
+ ## AMD ROCm / TheRock
+ 
+@@ -17,3 +17,8 @@ The bootstrap downloads AMD's official Windows `gfx1151` ROCm 10.0.0 tarball. RO
+ ## vcpkg dependencies
+ 
+ ICU, OpenSSL, libpng, libjpeg-turbo, cURL, and their transitive dependencies are installed by vcpkg and retain their own licenses.
++
++
++## Research inspiration
++
++The native context-lookup and speculative-economics work was informed by published benchmark methodology and experiments in MKM-030/strix-alloy and MKM-030/strix-alloy-wsl2. FlashNextVelocity does not import their WSL/DXG bridge or Linux memory hooks; the implementation here is native Windows and independently integrated into the Gufo-based runtime.
+diff --git a/VERSION.json b/VERSION.json
+index 39175ca..b2ac262 100644
+--- a/VERSION.json
++++ b/VERSION.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "FlashNextVelocity Studio",
+-  "version": "1.0.4",
++  "version": "1.0.5",
+   "gufo_commit": "9cad13974cf6da0cd3674b4e0a88b14b7e4a2908",
+   "target": "Windows 11 x64 / AMD gfx1151",
+-  "notes": "Project-local ROCm migration and gfx1151 hipBLASLt Tensile path fix."
+-}
+\ No newline at end of file
++  "notes": "Native context-lookup speculative lane, per-position MTP economics telemetry, and Windows RAM/commit memory guard."
++}
+diff --git a/config.example.json b/config.example.json
+index 0dfdc2a..c282858 100644
+--- a/config.example.json
++++ b/config.example.json
+@@ -1,23 +1,30 @@
+-{
+-  "model": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+-  "mtp": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\MTP\\mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+-  "mmproj": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\mmproj-F16.gguf",
+-  "host": "127.0.0.1",
+-  "port": 8080,
+-  "context": 131072,
+-  "draft_max": 7,
+-  "draft_confidence": 0.00,
+-  "sessions": 1,
+-  "default_max_tokens": 4096,
+-  "thinking": true,
+-  "preserve_thinking": false,
+-  "reasoning_effort": "medium",
+-  "sampling": {
+-    "temperature": 0.35,
+-    "top_p": 0.9,
+-    "top_k": 40,
+-    "min_p": 0.05,
+-    "repeat_penalty": 1.05,
+-    "repeat_last_n": 512
+-  }
+-}
++{
++  "model": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
++  "mtp": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\MTP\\mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
++  "mmproj": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\mmproj-F16.gguf",
++  "host": "127.0.0.1",
++  "port": 8080,
++  "context": 131072,
++  "draft_max": 7,
++  "draft_confidence": 0.0,
++  "context_lookup": true,
++  "context_lookup_min_ngram": 3,
++  "context_lookup_max_ngram": 6,
++  "context_lookup_window": 32768,
++  "context_lookup_min_draft": 2,
++  "memory_guard": true,
++  "memory_guard_min_available_gib": 8.0,
++  "sessions": 1,
++  "default_max_tokens": 4096,
++  "thinking": true,
++  "preserve_thinking": false,
++  "reasoning_effort": "medium",
++  "sampling": {
++    "temperature": 0.35,
++    "top_p": 0.9,
++    "top_k": 40,
++    "min_p": 0.05,
++    "repeat_penalty": 1.05,
++    "repeat_last_n": 512
++  }
++}
+diff --git a/gufo-overlay/src/models/qwen38_flash_next/context_lookup.hpp b/gufo-overlay/src/models/qwen38_flash_next/context_lookup.hpp
+new file mode 100644
+index 0000000..1071970
+--- /dev/null
++++ b/gufo-overlay/src/models/qwen38_flash_next/context_lookup.hpp
+@@ -0,0 +1,92 @@
++#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_CONTEXT_LOOKUP_HPP_
++#define GUFO_MODELS_QWEN38_FLASH_NEXT_CONTEXT_LOOKUP_HPP_
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <span>
++#include <vector>
++
++namespace gufo::models::qwen38_flash_next {
++
++struct ContextLookupMatch {
++  std::vector<std::int32_t> continuation;
++  std::uint32_t ngram{0};
++  std::uint32_t source_end{0};
++  std::uint32_t distance{0};
++};
++
++/// Finds a continuation already present in the committed context. The query is
++/// the longest suffix ending in `anchor`; matches are searched newest-first so
++/// local code/JSON/tool patterns win over stale distant text. This is a pure
++/// proposal source: target verification remains authoritative.
++inline std::optional<ContextLookupMatch> FindContextLookup(
++    std::span<const std::int32_t> history, std::int32_t anchor,
++    std::uint32_t max_tokens, std::uint32_t min_ngram,
++    std::uint32_t max_ngram, std::uint32_t search_window,
++    std::uint32_t min_draft_tokens) {
++  if (max_tokens == 0 || min_draft_tokens == 0 || history.empty())
++    return std::nullopt;
++  min_ngram = std::max<std::uint32_t>(2, min_ngram);
++  max_ngram = std::max(min_ngram, max_ngram);
++  const std::uint32_t available_order = static_cast<std::uint32_t>(
++      std::min<std::size_t>(history.size() + 1, max_ngram));
++  if (available_order < min_ngram) return std::nullopt;
++
++  const std::size_t history_size = history.size();
++  const std::size_t window = search_window == 0
++                                 ? history_size
++                                 : std::min<std::size_t>(search_window,
++                                                         history_size);
++  const std::size_t search_floor = history_size - window;
++
++  for (std::uint32_t order = available_order;; --order) {
++    const std::size_t prefix = order - 1;
++    if (history_size >= prefix + 1) {
++      // candidate_end must leave at least one historical token after the
++      // matched n-gram to use as a continuation.
++      std::size_t candidate_end = history_size - 2;
++      const std::size_t earliest = std::max(search_floor + prefix, prefix);
++      if (candidate_end >= earliest) {
++        for (;;) {
++          if (history[candidate_end] == anchor) {
++            bool same = true;
++            const std::size_t query_begin = history_size - prefix;
++            const std::size_t candidate_begin = candidate_end - prefix;
++            for (std::size_t i = 0; i < prefix; ++i) {
++              if (history[query_begin + i] != history[candidate_begin + i]) {
++                same = false;
++                break;
++              }
++            }
++            if (same) {
++              const std::size_t continuation_begin = candidate_end + 1;
++              const std::size_t continuation_count = std::min<std::size_t>(
++                  max_tokens, history_size - continuation_begin);
++              if (continuation_count >= min_draft_tokens) {
++                ContextLookupMatch match;
++                match.ngram = order;
++                match.source_end = static_cast<std::uint32_t>(candidate_end);
++                match.distance = static_cast<std::uint32_t>(
++                    history_size - 1 - candidate_end);
++                match.continuation.assign(
++                    history.begin() + continuation_begin,
++                    history.begin() + continuation_begin + continuation_count);
++                return match;
++              }
++            }
++          }
++          if (candidate_end == earliest) break;
++          --candidate_end;
++        }
++      }
++    }
++    if (order == min_ngram) break;
++  }
++  return std::nullopt;
++}
++
++}  // namespace gufo::models::qwen38_flash_next
++
++#endif
+diff --git a/gufo-overlay/src/models/qwen38_flash_next/engine.cpp b/gufo-overlay/src/models/qwen38_flash_next/engine.cpp
+index a378ec8..0ee91f0 100644
+--- a/gufo-overlay/src/models/qwen38_flash_next/engine.cpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/engine.cpp
+@@ -76,6 +76,15 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
+     AssignError(error_msg, "draft token limit must be positive");
+     return nullptr;
+   }
++  if (options.context_lookup &&
++      (options.context_lookup_min_ngram < 2 ||
++       options.context_lookup_max_ngram < options.context_lookup_min_ngram ||
++       options.context_lookup_max_ngram > 32 ||
++       options.context_lookup_min_draft == 0 ||
++       options.context_lookup_min_draft > kMaxMtpDraftTokens)) {
++    AssignError(error_msg, "context lookup settings are invalid");
++    return nullptr;
++  }
+   if (!options.mtp_model_path.empty() &&
+       options.max_draft_tokens > kMaxMtpDraftTokens) {
+     AssignError(error_msg,
+@@ -608,6 +617,9 @@ struct Session::PendingDecode {
+   MtpCandidateLogits candidates;
+   std::int32_t draft{0};
+   bool confidence_stopped{false};
++  bool lookup{false};
++  std::uint32_t lookup_ngram{0};
++  std::uint32_t lookup_distance{0};
+ };
+ 
+ void Session::AppendDraft(PendingDecode& pending) {
+@@ -620,6 +632,18 @@ void Session::AppendDraft(PendingDecode& pending) {
+   pending.chain.push_back(pending.draft);
+ }
+ 
++namespace {
++MtpProposal LookupProposal(std::int32_t token) {
++  MtpProposal proposal;
++  proposal.ids[0] = static_cast<sampling::TokenId>(token);
++  proposal.probabilities[0] = 1.0F;
++  proposal.size = 1;
++  proposal.token = static_cast<sampling::TokenId>(token);
++  proposal.probability = 1.0F;
++  return proposal;
++}
++}  // namespace
++
+ bool Session::DropLowConfidenceDraft(PendingDecode& pending) {
+   if (pending.confidence_stopped || !pending.sampled ||
+       !(draft_confidence_ > 0.0F) || pending.proposals.empty())
+@@ -693,11 +717,7 @@ bool Session::PrepareDecode(const DecodeRequest& request,
+     result->stop = true;
+     return true;
+   }
+-  if (!MtpEnabled() || width < 2) {
+-    if (MtpEnabled() && !defer_head) {
+-      fnvprof::Scope catchup(fnvprof::Stage::Catchup);
+-      if (!DraftCatchUp(anchor, false, error_msg)) return false;
+-    }
++  if (!MtpEnabled()) {
+     pending->chain = {anchor};
+     pending->base = static_cast<std::uint32_t>(tokens_.size());
+     return true;
+@@ -707,6 +727,79 @@ bool Session::PrepareDecode(const DecodeRequest& request,
+   const bool sampled = sampler.config().uses_random_sampling();
+   const bool gpu_greedy = sampler.config().can_use_unmodified_argmax();
+   const bool gpu_verification = gpu_greedy;
++
++  // Prompt/context lookup is a proposal source, not a second decoder. It is
++  // single-session only for now so the existing shared MTP batch scheduler is
++  // untouched. Its width is capped by configured draft capacity, not the MTP
++  // length learner: lookup selection avoids the recursive draft-head proposal
++  // work and has different economics. Sampled requests use an exact one-hot q
++  // distribution and the same p/q rejection+residual verifier as MTP,
++  // preserving target sampling.
++  const auto lookup_budget =
++      cap > 1 ? std::min<std::size_t>(model_->options_.max_draft_tokens, cap - 1)
++              : 0;
++  if (!defer_head && model_->options_.context_lookup &&
++      lookup_budget >= model_->options_.context_lookup_min_draft) {
++    const auto lookup = FindContextLookup(
++        tokens_, anchor, static_cast<std::uint32_t>(lookup_budget),
++        model_->options_.context_lookup_min_ngram,
++        model_->options_.context_lookup_max_ngram,
++        model_->options_.context_lookup_window,
++        model_->options_.context_lookup_min_draft);
++    if (lookup) {
++      // The lookup lane replaces MTP proposal generation, not MTP recurrent
++      // state maintenance. Advance the draft block through the newly known
++      // anchor without running its output head so MtpRewind(base) below names
++      // a state that was actually computed. This also preserves the hidden-row
++      // contract if several lookup cycles occur before the next MTP proposal.
++      {
++        fnvprof::Scope catchup(fnvprof::Stage::Catchup);
++        if (!DraftCatchUp(anchor, false, error_msg)) return false;
++      }
++      pending->chain.reserve(1 + lookup->continuation.size());
++      pending->chain.push_back(anchor);
++      pending->chain.insert(pending->chain.end(), lookup->continuation.begin(),
++                            lookup->continuation.end());
++      if (sampled) {
++        pending->proposals.reserve(lookup->continuation.size());
++        for (const auto token : lookup->continuation)
++          pending->proposals.push_back(LookupProposal(token));
++      }
++      pending->base = base;
++      pending->width = pending->chain.size();
++      pending->speculative = true;
++      pending->sampled = sampled;
++      pending->gpu_greedy = gpu_greedy;
++      pending->gpu_verification = gpu_verification;
++      pending->host_pinned_verification = !gpu_verification;
++      pending->compact_verification =
++          pending->host_pinned_verification && sampled &&
++          CanUseCompactMtpVerification(sampler);
++      if (pending->host_pinned_verification && sampled &&
++          !pending->compact_verification) {
++        fnvprof::NoteUnsupportedSamplerFallback();
++      }
++      pending->lookup = true;
++      pending->lookup_ngram = lookup->ngram;
++      pending->lookup_distance = lookup->distance;
++      return true;
++    }
++  }
++
++  // The MTP policy may deliberately schedule an autoregressive cooldown.
++  // Context lookup is checked before this gate because it is an independent
++  // proposal source with different economics. If lookup did not match, retain
++  // the original headless-MTP catch-up behavior for the AR cycle.
++  if (width < 2) {
++    if (!defer_head) {
++      fnvprof::Scope catchup(fnvprof::Stage::Catchup);
++      if (!DraftCatchUp(anchor, false, error_msg)) return false;
++    }
++    pending->chain = {anchor};
++    pending->base = base;
++    return true;
++  }
++
+   {
+     fnvprof::Scope catchup(fnvprof::Stage::Catchup);
+     if (!defer_head &&
+@@ -803,7 +896,7 @@ bool Session::FinishDecode(const DecodeRequest& request,
+     result->drafted = 0;
+     result->accepted = 0;
+     result->depth = 0;
+-    fnvprof::EndCycle(0, 0, 0, 1);
++    fnvprof::EndCycle(0, 0, 0, 1, fnvprof::ProposalSource::None);
+     return true;
+   }
+   sampler.Accept(static_cast<sampling::TokenId>(anchor));
+@@ -949,9 +1042,27 @@ bool Session::FinishDecode(const DecodeRequest& request,
+   stats_.cycles += 1;
+   stats_.drafted += k - 1;
+   stats_.accepted += keep - 1;
++  if (pending.lookup) {
++    ++stats_.lookup_cycles;
++    stats_.lookup_drafted += k - 1;
++    stats_.lookup_accepted += keep - 1;
++    stats_.lookup_ngram_sum += pending.lookup_ngram;
++    stats_.lookup_distance_sum += pending.lookup_distance;
++  } else {
++    ++stats_.mtp_cycles;
++    stats_.mtp_drafted += k - 1;
++    stats_.mtp_accepted += keep - 1;
++  }
+   // A target stop ends the request; it does not classify the remaining
+-  // proposals as failed predictions.
+-  draft_length_.Observe(keep - 1, result->stop ? keep - 1 : k - 1, base);
++  // proposals as failed predictions. Lookup acceptance is deliberately excluded
++  // from the MTP acceptance learner because it measures repeated-context
++  // predictability, not draft-head quality. It still advances one AR cooldown
++  // tick so a temporarily disabled MTP policy eventually gets its normal retry.
++  if (pending.lookup) {
++    for (std::uint32_t i = 0; i < keep; ++i) draft_length_.ObserveArToken();
++  } else {
++    draft_length_.Observe(keep - 1, result->stop ? keep - 1 : k - 1, base);
++  }
+ 
+   // The next call knows the next sampled anchor. Defer draft catch-up until
+   // then, retaining this session's target hidden rows across interleaving.
+@@ -964,7 +1075,11 @@ bool Session::FinishDecode(const DecodeRequest& request,
+   result->drafted = k - 1;
+   result->accepted = keep - 1;
+   result->depth = k - 1;
+-  fnvprof::EndCycle(k - 1, k - 1, keep - 1, keep);
++  result->lookup = pending.lookup;
++  result->lookup_ngram = pending.lookup_ngram;
++  fnvprof::EndCycle(k - 1, k - 1, keep - 1, keep,
++                    pending.lookup ? fnvprof::ProposalSource::Lookup
++                                   : fnvprof::ProposalSource::Mtp);
+   return true;
+ }
+ 
+diff --git a/gufo-overlay/src/models/qwen38_flash_next/engine.hpp b/gufo-overlay/src/models/qwen38_flash_next/engine.hpp
+index fc90460..ef753ea 100644
+--- a/gufo-overlay/src/models/qwen38_flash_next/engine.hpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/engine.hpp
+@@ -5,6 +5,7 @@
+ #include <cstdint>
+ #include <functional>
+ #include <memory>
++#include <optional>
+ #include <span>
+ #include <string>
+ #include <string_view>
+@@ -16,6 +17,7 @@
+ #include "src/models/qwen/vision/encoder.hpp"
+ #include "src/models/qwen/vision/prompt.hpp"
+ #include "src/models/qwen38_flash_next/config.hpp"
++#include "src/models/qwen38_flash_next/context_lookup.hpp"
+ #include "src/models/qwen38_flash_next/mtp_policy.hpp"
+ #include "src/models/qwen38_flash_next/mtp_sampling.hpp"
+ 
+@@ -45,6 +47,13 @@ struct ModelOptions {
+   /// Fixed serving capacity used by the calibrated MTP cost model. Keeping
+   /// it independent of scheduler timing preserves seeded request replay.
+   std::uint32_t decode_concurrency = 1;
++  /// Native prompt/context lookup lane. It proposes only text already present
++  /// in the committed context; the target still verifies every proposal.
++  bool context_lookup = true;
++  std::uint32_t context_lookup_min_ngram = 3;
++  std::uint32_t context_lookup_max_ngram = 6;
++  std::uint32_t context_lookup_window = 32768;
++  std::uint32_t context_lookup_min_draft = 2;
+ };
+ 
+ class Session;
+@@ -134,6 +143,8 @@ public:
+     std::uint32_t drafted{0};
+     std::uint32_t accepted{0};
+     std::uint32_t depth{0};
++    bool lookup{false};
++    std::uint32_t lookup_ngram{0};
+   };
+   /// Greedy decoding verifies deterministic drafts. Sampled decoding draws
+   /// compact MTP proposals and uses target/draft rejection with a residual
+@@ -201,6 +212,14 @@ public:
+     std::uint64_t low_confidence_stops{0};
+     std::uint64_t compact_frontier_samples{0};
+     std::uint64_t compact_frontier_fallbacks{0};
++    std::uint64_t mtp_cycles{0};
++    std::uint64_t mtp_drafted{0};
++    std::uint64_t mtp_accepted{0};
++    std::uint64_t lookup_cycles{0};
++    std::uint64_t lookup_drafted{0};
++    std::uint64_t lookup_accepted{0};
++    std::uint64_t lookup_ngram_sum{0};
++    std::uint64_t lookup_distance_sum{0};
+   };
+   [[nodiscard]] const SpeculativeStats& Statistics() const noexcept {
+     return stats_;
+diff --git a/scripts/build.ps1 b/scripts/build.ps1
+index 2d5a70f..c3369bc 100644
+--- a/scripts/build.ps1
++++ b/scripts/build.ps1
+@@ -126,6 +126,15 @@ Write-Host 'LLVM 23 gfx1151 W8A8 scheduler-spill fix verified.' -ForegroundColor
+ if(-not (Select-String -Path $engineSource -SimpleMatch 'pending->chain.size() < 2' -Quiet)){
+   throw 'Gufo overlay is missing the engine confidence-stop compact fallback.'
+ }
++$contextLookupSource=Join-Path $Gufo 'src\models\qwen38_flash_next\context_lookup.hpp'
++if(-not(Test-Path $contextLookupSource) -or
++   -not (Select-String -Path $contextLookupSource -SimpleMatch 'FindContextLookup' -Quiet) -or
++   -not (Select-String -Path $engineSource -SimpleMatch 'lookup_budget' -Quiet) -or
++   -not (Select-String -Path $engineSource -SimpleMatch 'The lookup lane replaces MTP proposal generation, not MTP recurrent' -Quiet) -or
++   -not (Select-String -Path $engineSource -SimpleMatch 'Lookup acceptance is deliberately excluded' -Quiet)){
++  throw 'Gufo overlay is missing the native context-lookup proposal lane or its MTP-policy isolation.'
++}
++Write-Host 'Native context lookup + recurrent-state maintenance + MTP-policy isolation source verified.' -ForegroundColor Green
+ 
+ function ValidRocm([string]$p){if(-not $p -or -not(Test-Path $p)){return $false};$cc=Get-ChildItem $p -Recurse -Filter clang++.exe -EA SilentlyContinue|Where-Object {$_.FullName -match 'llvm\\bin\\clang\+\+\.exe$'}|Select-Object -First 1;$isa=Get-ChildItem $p -Recurse -Filter oclc_isa_version_1151.bc -EA SilentlyContinue|Select-Object -First 1;return [bool]($cc -and $isa)}
+ # Studio owns its ROCm SDK. Reuse/copy an existing SDK once, but never keep a runtime dependency on another project folder.
+@@ -186,6 +195,12 @@ $CmakeCacheText=Get-Content $CmakeCache -Raw
+ if($CmakeCacheText -notmatch '(?m)^CMAKE_HIP_ARCHITECTURES:STRING=gfx1151\r?$'){throw 'Fresh CMake cache is not pinned to gfx1151.'}
+ if($CmakeCacheText -match '(?i)C:\\flashfknworkalready'){throw 'Fresh CMake cache still contains a legacy C:\flashfknworkalready path.'}
+ Write-Host 'Fresh CMake cache verified: gfx1151 + project-local ROCm.' -ForegroundColor Green
++& cmake.exe --build $Build --target FlashNextVelocityUnitTests -j 16;if($LASTEXITCODE -ne 0){throw 'Native unit-test build failed.'}
++$UnitTests=Join-Path $Build 'bin\FlashNextVelocityUnitTests.exe'
++if(-not(Test-Path $UnitTests)){throw 'Native unit-test executable missing after build.'}
++& $UnitTests
++if($LASTEXITCODE -ne 0){throw 'Native context-lookup/profiler unit tests failed.'}
++Write-Host 'Native context-lookup/profiler unit tests passed.' -ForegroundColor Green
+ & cmake.exe --build $Build --target FlashNextVelocityEngine -j 16;if($LASTEXITCODE -ne 0){throw 'Native engine build failed.'}
+ $EngineBin=Join-Path $Build 'bin';$EngineExe=Join-Path $EngineBin 'FlashNextVelocity.Engine.exe';if(-not(Test-Path $EngineExe)){throw 'Native engine executable missing after build.'}
+ # Prove that the executable was rebuilt from the repaired compact-verification
+@@ -195,10 +210,10 @@ $engineAscii=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($EngineExe
+ if($engineAscii.Contains($legacyCompactFatal)){
+   throw 'Native engine validation failed: built EXE still contains the legacy compact-verification fatal. Stale object reuse detected.'
+ }
+-if(-not $engineAscii.Contains('fnv-exact-frontier-draft256-v7')){
++if(-not $engineAscii.Contains('fnv-context-lookup-economics-v8')){
+   throw 'Native engine validation failed: current runtime revision marker is missing from the built EXE.'
+ }
+-Write-Host 'Native engine source revision verified: fnv-exact-frontier-draft256-v7; legacy compact fatal absent.' -ForegroundColor Green
++Write-Host 'Native engine source revision verified: fnv-context-lookup-economics-v8; legacy compact fatal absent.' -ForegroundColor Green
+ $engineAscii=$null
+ 
+ # Desktop app.
+@@ -240,7 +255,7 @@ $DistConfig=Join-Path $Dist 'config.json'
+ if($null -ne $PreservedConfig){
+   [IO.File]::WriteAllText($DistConfig,$PreservedConfig,[Text.UTF8Encoding]::new($false))
+ }else{
+-  $defaultConfig=@{model='';mtp='';mmproj='';host='127.0.0.1';port=8080;context=131072;draft_max=7;draft_confidence=0.0;sessions=1;default_max_tokens=4096;thinking=$true;preserve_thinking=$false;reasoning_effort='medium';sampling=@{temperature=.35;top_p=.90;top_k=40;min_p=.05;repeat_penalty=1.05;repeat_last_n=512}}|ConvertTo-Json -Depth 5
++  $defaultConfig=@{model='';mtp='';mmproj='';host='127.0.0.1';port=8080;context=131072;draft_max=7;draft_confidence=0.0;context_lookup=$true;context_lookup_min_ngram=3;context_lookup_max_ngram=6;context_lookup_window=32768;context_lookup_min_draft=2;memory_guard=$true;memory_guard_min_available_gib=8.0;sessions=1;default_max_tokens=4096;thinking=$true;preserve_thinking=$false;reasoning_effort='medium';sampling=@{temperature=.35;top_p=.90;top_k=40;min_p=.05;repeat_penalty=1.05;repeat_last_n=512}}|ConvertTo-Json -Depth 5
+   [IO.File]::WriteAllText($DistConfig,$defaultConfig,[Text.UTF8Encoding]::new($false))
+ }
+ if($null -ne $PreservedUi){
+diff --git a/src/desktop/ApiClient.cs b/src/desktop/ApiClient.cs
+index 0a43d42..74e194e 100644
+--- a/src/desktop/ApiClient.cs
++++ b/src/desktop/ApiClient.cs
+@@ -3,8 +3,8 @@ using System.Text.Json;
+ 
+ namespace FlashNextVelocity.Desktop;
+ 
+-internal sealed record HealthInfo(string Status, string Model, bool Mtp, bool Vision, double LoadSeconds, ulong Context, ulong DraftMax, double DraftConfidence);
+-internal sealed record BenchmarkResult(double PrefillTps, double DecodeTps, double Acceptance, ulong Drafted, ulong Accepted, IReadOnlyList<double> Windows, string Report, double TtftMs, double AvgDraftDepth, double QsaPct, double PleWaitMs, double FallbackPct, double SyncPerToken, string RawJson);
++internal sealed record HealthInfo(string Status, string Model, bool Mtp, bool Vision, bool ContextLookup, double LoadSeconds, ulong Context, ulong DraftMax, double DraftConfidence);
++internal sealed record BenchmarkResult(double PrefillTps, double DecodeTps, double Acceptance, double LookupAcceptance, ulong Drafted, ulong Accepted, ulong LookupDrafted, ulong LookupAccepted, IReadOnlyList<double> Windows, string Report, double TtftMs, double AvgDraftDepth, double QsaPct, double PleWaitMs, double FallbackPct, double SyncPerToken, string RawJson);
+ 
+ internal sealed class ApiClient : IDisposable
+ {
+@@ -21,6 +21,8 @@ internal sealed class ApiClient : IDisposable
+             x.TryGetProperty("model", out var m) ? m.GetString() ?? "" : "",
+             x.TryGetProperty("mtp", out var mtp) && mtp.GetBoolean(),
+             x.TryGetProperty("vision", out var v) && v.GetBoolean(),
++            x.TryGetProperty("context_lookup_active", out var lookupActive) ? lookupActive.GetBoolean() :
++                (x.TryGetProperty("context_lookup", out var lookup) && lookup.GetBoolean()),
+             x.TryGetProperty("load_seconds", out var ls) ? ls.GetDouble() : 0,
+             x.TryGetProperty("context", out var c) ? c.GetUInt64() : 0,
+             x.TryGetProperty("draft_max", out var dm) ? dm.GetUInt64() : 0,
+@@ -105,9 +107,12 @@ internal sealed class ApiClient : IDisposable
+         return new BenchmarkResult(
+             m.GetProperty("prefill_tokens_per_second").GetDouble(),
+             m.GetProperty("completion_tokens_per_second").GetDouble(),
+-            m.GetProperty("draft_acceptance").GetDouble(),
+-            m.GetProperty("draft_tokens").GetUInt64(),
+-            m.GetProperty("draft_tokens_accepted").GetUInt64(), windows,
++            m.TryGetProperty("mtp_acceptance", out var mtpAcceptance) ? mtpAcceptance.GetDouble() : m.GetProperty("draft_acceptance").GetDouble(),
++            Num(m, "lookup_acceptance"),
++            m.TryGetProperty("mtp_draft_tokens", out var mtpDrafted) ? mtpDrafted.GetUInt64() : m.GetProperty("draft_tokens").GetUInt64(),
++            m.TryGetProperty("mtp_draft_tokens_accepted", out var mtpAccepted) ? mtpAccepted.GetUInt64() : m.GetProperty("draft_tokens_accepted").GetUInt64(),
++            m.TryGetProperty("lookup_draft_tokens", out var lookupDrafted) ? lookupDrafted.GetUInt64() : 0UL,
++            m.TryGetProperty("lookup_draft_tokens_accepted", out var lookupAccepted) ? lookupAccepted.GetUInt64() : 0UL, windows,
+             report, Num(m, "ttft_ms"), depth, qsaPct, ple, fallback, syncPer, text);
+     }
+ 
+diff --git a/src/desktop/EngineConfig.cs b/src/desktop/EngineConfig.cs
+index da97120..0ce6619 100644
+--- a/src/desktop/EngineConfig.cs
++++ b/src/desktop/EngineConfig.cs
+@@ -24,6 +24,13 @@ internal sealed class EngineConfig
+     [JsonPropertyName("context")] public uint Context { get; set; } = 131072;
+     [JsonPropertyName("draft_max")] public uint DraftMax { get; set; } = 7;
+     [JsonPropertyName("draft_confidence")] public double DraftConfidence { get; set; } = 0;
++    [JsonPropertyName("context_lookup")] public bool ContextLookup { get; set; } = true;
++    [JsonPropertyName("context_lookup_min_ngram")] public uint ContextLookupMinNgram { get; set; } = 3;
++    [JsonPropertyName("context_lookup_max_ngram")] public uint ContextLookupMaxNgram { get; set; } = 6;
++    [JsonPropertyName("context_lookup_window")] public uint ContextLookupWindow { get; set; } = 32768;
++    [JsonPropertyName("context_lookup_min_draft")] public uint ContextLookupMinDraft { get; set; } = 2;
++    [JsonPropertyName("memory_guard")] public bool MemoryGuard { get; set; } = true;
++    [JsonPropertyName("memory_guard_min_available_gib")] public double MemoryGuardMinAvailableGiB { get; set; } = 8.0;
+     [JsonPropertyName("sessions")] public uint Sessions { get; set; } = 1;
+     [JsonPropertyName("default_max_tokens")] public int DefaultMaxTokens { get; set; } = 4096;
+     [JsonPropertyName("thinking")] public bool Thinking { get; set; } = true;
+@@ -69,6 +76,13 @@ internal sealed class EngineConfig
+             && Context == other.Context
+             && DraftMax == other.DraftMax
+             && Near(DraftConfidence, other.DraftConfidence)
++            && ContextLookup == other.ContextLookup
++            && ContextLookupMinNgram == other.ContextLookupMinNgram
++            && ContextLookupMaxNgram == other.ContextLookupMaxNgram
++            && ContextLookupWindow == other.ContextLookupWindow
++            && ContextLookupMinDraft == other.ContextLookupMinDraft
++            && MemoryGuard == other.MemoryGuard
++            && Near(MemoryGuardMinAvailableGiB, other.MemoryGuardMinAvailableGiB)
+             && Sessions == other.Sessions
+             && DefaultMaxTokens == other.DefaultMaxTokens
+             && Thinking == other.Thinking
+@@ -131,6 +145,12 @@ internal sealed class EngineConfig
+         if (DraftMax is < 1 or > 7) throw new InvalidOperationException("MTP draft max must be from 1 to 7.");
+         if (!double.IsFinite(DraftConfidence) || DraftConfidence is < 0 or > 1)
+             throw new InvalidOperationException("MTP draft confidence must be from 0.00 to 1.00.");
++        if (ContextLookup && (ContextLookupMinNgram < 2 || ContextLookupMaxNgram < ContextLookupMinNgram || ContextLookupMaxNgram > 32))
++            throw new InvalidOperationException("Context lookup n-gram range is invalid.");
++        if (ContextLookupMinDraft is < 1 or > 7)
++            throw new InvalidOperationException("Context lookup minimum draft must be from 1 to 7.");
++        if (!double.IsFinite(MemoryGuardMinAvailableGiB) || MemoryGuardMinAvailableGiB is < 0 or > 128)
++            throw new InvalidOperationException("Memory guard floor must be from 0 to 128 GiB.");
+         if (Sessions != 1) throw new InvalidOperationException("This Windows runtime currently requires sessions=1.");
+         if (DefaultMaxTokens < 1) throw new InvalidOperationException("Default max tokens must be positive.");
+         if (ReasoningEffort is not ("low" or "medium" or "xhigh"))
+diff --git a/src/desktop/EngineManager.cs b/src/desktop/EngineManager.cs
+index 448f0ce..78a8955 100644
+--- a/src/desktop/EngineManager.cs
++++ b/src/desktop/EngineManager.cs
+@@ -6,7 +6,7 @@ namespace FlashNextVelocity.Desktop;
+ 
+ internal sealed class EngineManager : IDisposable
+ {
+-    private const string RequiredRuntimeRevision = "fnv-exact-frontier-draft256-v7";
++    private const string RequiredRuntimeRevision = "fnv-context-lookup-economics-v8";
+     private Process? _process;
+     private StreamWriter? _logWriter;
+     private EngineConfig? _appliedConfig;
+@@ -185,6 +185,13 @@ internal sealed class EngineManager : IDisposable
+         Check(Int(root, "context") == expected.Context, "context", expected.Context, Int(root, "context"));
+         Check(Int(root, "draft_max") == expected.DraftMax, "draft_max", expected.DraftMax, Int(root, "draft_max"));
+         Check(Near(Num(root, "draft_confidence"), expected.DraftConfidence), "draft_confidence", expected.DraftConfidence.ToString("0.00"), Num(root, "draft_confidence"));
++        Check(Bool(root, "context_lookup") == expected.ContextLookup, "context_lookup", expected.ContextLookup, Bool(root, "context_lookup"));
++        Check(Int(root, "context_lookup_min_ngram") == expected.ContextLookupMinNgram, "context_lookup_min_ngram", expected.ContextLookupMinNgram, Int(root, "context_lookup_min_ngram"));
++        Check(Int(root, "context_lookup_max_ngram") == expected.ContextLookupMaxNgram, "context_lookup_max_ngram", expected.ContextLookupMaxNgram, Int(root, "context_lookup_max_ngram"));
++        Check(Int(root, "context_lookup_window") == expected.ContextLookupWindow, "context_lookup_window", expected.ContextLookupWindow, Int(root, "context_lookup_window"));
++        Check(Int(root, "context_lookup_min_draft") == expected.ContextLookupMinDraft, "context_lookup_min_draft", expected.ContextLookupMinDraft, Int(root, "context_lookup_min_draft"));
++        Check(Bool(root, "memory_guard") == expected.MemoryGuard, "memory_guard", expected.MemoryGuard, Bool(root, "memory_guard"));
++        Check(Near(Num(root, "memory_guard_min_available_gib"), expected.MemoryGuardMinAvailableGiB), "memory_guard_min_available_gib", expected.MemoryGuardMinAvailableGiB, Num(root, "memory_guard_min_available_gib"));
+         Check(Int(root, "sessions") == expected.Sessions, "sessions", expected.Sessions, Int(root, "sessions"));
+         Check(Int(root, "default_max_tokens") == expected.DefaultMaxTokens, "default_max_tokens", expected.DefaultMaxTokens, Int(root, "default_max_tokens"));
+         Check(Bool(root, "thinking") == expected.Thinking, "thinking", expected.Thinking, Bool(root, "thinking"));
+diff --git a/src/desktop/FlashNextVelocity.Desktop.csproj b/src/desktop/FlashNextVelocity.Desktop.csproj
+index e7c0048..2d7394f 100644
+--- a/src/desktop/FlashNextVelocity.Desktop.csproj
++++ b/src/desktop/FlashNextVelocity.Desktop.csproj
+@@ -1,14 +1,14 @@
+-<Project Sdk="Microsoft.NET.Sdk">
+-  <PropertyGroup>
+-    <OutputType>WinExe</OutputType>
+-    <TargetFramework>net8.0-windows</TargetFramework>
+-    <UseWindowsForms>true</UseWindowsForms>
+-    <Nullable>enable</Nullable>
+-    <ImplicitUsings>enable</ImplicitUsings>
+-    <AssemblyName>FlashNextVelocity</AssemblyName>
+-    <RootNamespace>FlashNextVelocity.Desktop</RootNamespace>
+-    <Version>1.0.3</Version>
+-    <ApplicationManifest>app.manifest</ApplicationManifest>
+-    <ApplicationIcon>..\..\assets\FlashNextVelocity.ico</ApplicationIcon>
+-  </PropertyGroup>
+-</Project>
++<Project Sdk="Microsoft.NET.Sdk">
++  <PropertyGroup>
++    <OutputType>WinExe</OutputType>
++    <TargetFramework>net8.0-windows</TargetFramework>
++    <UseWindowsForms>true</UseWindowsForms>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <AssemblyName>FlashNextVelocity</AssemblyName>
++    <RootNamespace>FlashNextVelocity.Desktop</RootNamespace>
++    <Version>1.0.5</Version>
++    <ApplicationManifest>app.manifest</ApplicationManifest>
++    <ApplicationIcon>..\..\assets\FlashNextVelocity.ico</ApplicationIcon>
++  </PropertyGroup>
++</Project>
+diff --git a/src/desktop/MainForm.cs b/src/desktop/MainForm.cs
+index 86c4d4b..8baa678 100644
+--- a/src/desktop/MainForm.cs
++++ b/src/desktop/MainForm.cs
+@@ -27,6 +27,7 @@ internal sealed class MainForm : Form
+     private readonly Label _benchPrefill = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 16, System.Drawing.FontStyle.Bold) };
+     private readonly Label _benchDecode = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 16, System.Drawing.FontStyle.Bold) };
+     private readonly Label _benchMtp = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 16, System.Drawing.FontStyle.Bold) };
++    private readonly Label _benchLookup = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 16, System.Drawing.FontStyle.Bold) };
+     private readonly Label _benchTtft = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold) };
+     private readonly Label _benchDepth = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold) };
+     private readonly Label _benchQsa = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold) };
+@@ -35,8 +36,8 @@ internal sealed class MainForm : Form
+     private readonly Label _benchSync = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold) };
+ 
+     private TextBox _modelPath = null!, _mtpPath = null!, _mmprojPath = null!, _host = null!;
+-    private NumericUpDown _port = null!, _context = null!, _draft = null!, _draftConfidence = null!, _defaultTokens = null!, _temp = null!, _topP = null!, _topK = null!, _minP = null!, _repeatPenalty = null!, _repeatLastN = null!;
+-    private CheckBox _thinking = null!, _preserveThinking = null!, _autoEngine = null!, _startWindows = null!;
++    private NumericUpDown _port = null!, _context = null!, _draft = null!, _draftConfidence = null!, _lookupMinNgram = null!, _lookupMaxNgram = null!, _lookupWindow = null!, _lookupMinDraft = null!, _memoryFloor = null!, _defaultTokens = null!, _temp = null!, _topP = null!, _topK = null!, _minP = null!, _repeatPenalty = null!, _repeatLastN = null!;
++    private CheckBox _contextLookup = null!, _memoryGuard = null!, _thinking = null!, _preserveThinking = null!, _autoEngine = null!, _startWindows = null!;
+     private ComboBox _reasoning = null!;
+ 
+     public MainForm(string[] args)
+@@ -136,6 +137,20 @@ internal sealed class MainForm : Form
+         _context = AddNumber(grid, ref r, "Context", 1024, 1048576, 0);
+         _draft = AddNumber(grid, ref r, "MTP draft max", 1, 7, 0);
+         _draftConfidence = AddNumber(grid, ref r, "MTP draft confidence", 0, 1, 2, .01m);
++        _contextLookup = AddCheck(grid, ref r, "Context lookup drafting");
++        _lookupMinNgram = AddNumber(grid, ref r, "Lookup min n-gram", 2, 32, 0);
++        _lookupMaxNgram = AddNumber(grid, ref r, "Lookup max n-gram", 2, 32, 0);
++        _lookupWindow = AddNumber(grid, ref r, "Lookup search window", 0, 1048576, 0);
++        _lookupMinDraft = AddNumber(grid, ref r, "Lookup minimum draft", 1, 7, 0);
++        _memoryGuard = AddCheck(grid, ref r, "Windows memory guard");
++        _memoryFloor = AddNumber(grid, ref r, "Memory guard floor GiB", 0, 128, 1, .5m);
++        _contextLookup.CheckedChanged += (_, _) =>
++        {
++            var enabled = _contextLookup.Checked;
++            _lookupMinNgram.Enabled = enabled; _lookupMaxNgram.Enabled = enabled;
++            _lookupWindow.Enabled = enabled; _lookupMinDraft.Enabled = enabled;
++        };
++        _memoryGuard.CheckedChanged += (_, _) => _memoryFloor.Enabled = _memoryGuard.Checked;
+         _defaultTokens = AddNumber(grid, ref r, "Default max tokens", 1, 65536, 0);
+         _temp = AddNumber(grid, ref r, "Temperature", 0, 2, 2, .05m);
+         _topP = AddNumber(grid, ref r, "Top P", .01m, 1, 2, .01m);
+@@ -188,7 +203,7 @@ internal sealed class MainForm : Form
+         var metrics = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0,10,0,10) };
+         metrics.Controls.AddRange(new Control[] {
+             MetricBox("Prefill", _benchPrefill), MetricBox("Decode", _benchDecode), MetricBox("MTP acceptance", _benchMtp),
+-            MetricBox("TTFT", _benchTtft), MetricBox("Avg draft depth", _benchDepth), MetricBox("QSA of decode", _benchQsa),
++            MetricBox("Lookup acceptance", _benchLookup), MetricBox("TTFT", _benchTtft), MetricBox("Avg draft depth", _benchDepth), MetricBox("QSA of decode", _benchQsa),
+             MetricBox("PLE wait", _benchPle), MetricBox("hipBLASLt fallback", _benchBlas), MetricBox("Sync / token", _benchSync)
+         });
+         _benchOutput.Font = new System.Drawing.Font("Consolas", 9F);
+@@ -209,11 +224,11 @@ internal sealed class MainForm : Form
+             }
+             _benchOutput.Text = "Running warmup and benchmark...";
+             var result = await _api.BenchmarkAsync(_cfg, (int)tokens.Value);
+-            _benchPrefill.Text = $"{result.PrefillTps:N2} tok/s"; _benchDecode.Text = $"{result.DecodeTps:N2} tok/s"; _benchMtp.Text = $"{result.Acceptance * 100:N1}%";
++            _benchPrefill.Text = $"{result.PrefillTps:N2} tok/s"; _benchDecode.Text = $"{result.DecodeTps:N2} tok/s"; _benchMtp.Text = $"{result.Acceptance * 100:N1}%"; _benchLookup.Text = result.LookupDrafted > 0 ? $"{result.LookupAcceptance * 100:N1}%" : "n/a";
+             _benchTtft.Text = $"{result.TtftMs:N0} ms"; _benchDepth.Text = $"{result.AvgDraftDepth:N2}"; _benchQsa.Text = $"{result.QsaPct:N1}%";
+             _benchPle.Text = $"{result.PleWaitMs:N1} ms"; _benchBlas.Text = $"{result.FallbackPct:N1}%"; _benchSync.Text = $"{result.SyncPerToken:N2} ms";
+             _benchOutput.Text = string.IsNullOrWhiteSpace(result.Report)
+-                ? $"Draft accepted: {result.Accepted}/{result.Drafted}\r\n64-token windows: {string.Join(", ", result.Windows.Select(x => x.ToString("N2")))}"
++                ? $"MTP accepted: {result.Accepted}/{result.Drafted}\r\nLookup accepted: {result.LookupAccepted}/{result.LookupDrafted}\r\n64-token windows: {string.Join(", ", result.Windows.Select(x => x.ToString("N2")))}"
+                 : result.Report.Replace("\n", "\r\n");
+             Directory.CreateDirectory(AppPaths.Benchmarks); File.WriteAllText(Path.Combine(AppPaths.Benchmarks, $"benchmark-{DateTime.Now:yyyyMMdd-HHmmss}.json"), result.RawJson);
+         });
+@@ -253,7 +268,10 @@ internal sealed class MainForm : Form
+     private void LoadSettingsControls()
+     {
+         _modelPath.Text = _cfg.Model; _mtpPath.Text = _cfg.Mtp; _mmprojPath.Text = _cfg.Mmproj; _host.Text = _cfg.Host;
+-        Set(_port, _cfg.Port); Set(_context, _cfg.Context); Set(_draft, _cfg.DraftMax); Set(_draftConfidence, (decimal)_cfg.DraftConfidence); Set(_defaultTokens, _cfg.DefaultMaxTokens);
++        Set(_port, _cfg.Port); Set(_context, _cfg.Context); Set(_draft, _cfg.DraftMax); Set(_draftConfidence, (decimal)_cfg.DraftConfidence);
++        _contextLookup.Checked = _cfg.ContextLookup; Set(_lookupMinNgram, _cfg.ContextLookupMinNgram); Set(_lookupMaxNgram, _cfg.ContextLookupMaxNgram); Set(_lookupWindow, _cfg.ContextLookupWindow); Set(_lookupMinDraft, _cfg.ContextLookupMinDraft);
++        _lookupMinNgram.Enabled = _cfg.ContextLookup; _lookupMaxNgram.Enabled = _cfg.ContextLookup; _lookupWindow.Enabled = _cfg.ContextLookup; _lookupMinDraft.Enabled = _cfg.ContextLookup;
++        _memoryGuard.Checked = _cfg.MemoryGuard; Set(_memoryFloor, (decimal)_cfg.MemoryGuardMinAvailableGiB); _memoryFloor.Enabled = _cfg.MemoryGuard; Set(_defaultTokens, _cfg.DefaultMaxTokens);
+         Set(_temp, (decimal)_cfg.Sampling.Temperature); Set(_topP, (decimal)_cfg.Sampling.TopP); Set(_topK, _cfg.Sampling.TopK); Set(_minP, (decimal)_cfg.Sampling.MinP); Set(_repeatPenalty, (decimal)_cfg.Sampling.RepeatPenalty); Set(_repeatLastN, _cfg.Sampling.RepeatLastN);
+         _thinking.Checked = _cfg.Thinking;
+         _preserveThinking.Checked = _cfg.PreserveThinking;
+@@ -275,6 +293,13 @@ internal sealed class MainForm : Form
+         _cfg.Context = (uint)_context.Value;
+         _cfg.DraftMax = (uint)_draft.Value;
+         _cfg.DraftConfidence = (double)_draftConfidence.Value;
++        _cfg.ContextLookup = _contextLookup.Checked;
++        _cfg.ContextLookupMinNgram = (uint)_lookupMinNgram.Value;
++        _cfg.ContextLookupMaxNgram = (uint)_lookupMaxNgram.Value;
++        _cfg.ContextLookupWindow = (uint)_lookupWindow.Value;
++        _cfg.ContextLookupMinDraft = (uint)_lookupMinDraft.Value;
++        _cfg.MemoryGuard = _memoryGuard.Checked;
++        _cfg.MemoryGuardMinAvailableGiB = (double)_memoryFloor.Value;
+         _cfg.DefaultMaxTokens = (int)_defaultTokens.Value;
+         _cfg.Sampling.Temperature = (double)_temp.Value;
+         _cfg.Sampling.TopP = (double)_topP.Value;
+@@ -301,7 +326,7 @@ internal sealed class MainForm : Form
+         _ui.Save();
+         ConfigureWindowsStartup(_ui.StartWithWindows);
+         UpdateStatusLabels();
+-        AppendLog($"ALL settings saved and read-back verified: draft_max={_cfg.DraftMax}, draft_confidence={_cfg.DraftConfidence:0.00}, thinking={_cfg.Thinking}, effort={(_cfg.Thinking ? _cfg.ReasoningEffort : "OFF")}, config={AppPaths.Config}");
++        AppendLog($"ALL settings saved and read-back verified: draft_max={_cfg.DraftMax}, draft_confidence={_cfg.DraftConfidence:0.00}, lookup={_cfg.ContextLookup}, lookup_ngram={_cfg.ContextLookupMinNgram}-{_cfg.ContextLookupMaxNgram}, memory_guard={_cfg.MemoryGuard}, thinking={_cfg.Thinking}, effort={(_cfg.Thinking ? _cfg.ReasoningEffort : "OFF")}, config={AppPaths.Config}");
+         if (_engine.IsRunning && _engine.RequiresRestart(_cfg))
+             AppendLog("Saved settings differ from the running engine. Use Restart/Save + Restart; Benchmark will apply them automatically.");
+     }
+@@ -329,7 +354,7 @@ internal sealed class MainForm : Form
+         {
+             var h = await _api.HealthAsync(_cfg);
+             _status.Text = $"Online  PID {_engine.ProcessId}  loaded {h.LoadSeconds:N1}s"; _status.ForeColor = System.Drawing.Color.ForestGreen;
+-            _model.Text = h.Model; _mtp.Text = h.Mtp ? $"ON · max {h.DraftMax} · conf {h.DraftConfidence:0.00}" : "OFF"; _vision.Text = h.Vision ? "ON" : "OFF"; _apiUrl.Text = _cfg.BaseUrl + "/v1";
++            _model.Text = h.Model; _mtp.Text = h.Mtp ? $"ON · max {h.DraftMax} · conf {h.DraftConfidence:0.00} · lookup {(h.ContextLookup ? "ON" : "OFF")}" : "OFF"; _vision.Text = h.Vision ? "ON" : "OFF"; _apiUrl.Text = _cfg.BaseUrl + "/v1";
+             try { _lastRequest.Text = (await _api.LastRequestAsync(_cfg)).Replace("\n", "\r\n"); } catch { }
+             _tray.Text = $"FlashNextVelocity - online - {(h.Mtp ? "MTP" : "no MTP")} - {(h.Vision ? "vision" : "text")}";
+         }
+diff --git a/src/desktop/app.manifest b/src/desktop/app.manifest
+index f6b7166..859fd75 100644
+--- a/src/desktop/app.manifest
++++ b/src/desktop/app.manifest
+@@ -1,6 +1,6 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+-  <assemblyIdentity version="1.0.3.0" name="FlashNextVelocity.Desktop" />
+-  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false" /></requestedPrivileges></security></trustInfo>
+-  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" /></application></compatibility>
+-</assembly>
++<?xml version="1.0" encoding="utf-8"?>
++<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
++  <assemblyIdentity version="1.0.5.0" name="FlashNextVelocity.Desktop" />
++  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false" /></requestedPrivileges></security></trustInfo>
++  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" /></application></compatibility>
++</assembly>
+diff --git a/src/native/bench_profile.hpp b/src/native/bench_profile.hpp
+index d13ea45..1f6c3db 100644
+--- a/src/native/bench_profile.hpp
++++ b/src/native/bench_profile.hpp
+@@ -8,6 +8,7 @@
+ #include <chrono>
+ #include <cstdint>
+ #include <cstdlib>
++#include <iterator>
+ #include <string>
+ #include <unordered_map>
+ #include <utility>
+@@ -20,6 +21,7 @@ inline constexpr int kDepths = 8;
+ inline constexpr int kStageCount = 9;
+ 
+ enum class Phase : int { Off = 0, Prefill = 1, Decode = 2 };
++enum class ProposalSource : int { None = 0, Mtp = 1, Lookup = 2 };
+ 
+ enum class VerifySubstage : int {
+   Trunk = 0,
+@@ -46,6 +48,8 @@ struct DepthRow {
+   std::uint64_t drafted{0};
+   std::uint64_t accepted{0};
+   std::uint64_t output_tokens{0};
++  double proposal_ms{0};
++  double verify_ms{0};
+ };
+ 
+ struct CycleRec {
+@@ -58,6 +62,7 @@ struct CycleRec {
+   double verify_ms{0};
+   double qsa_ms{0};
+   double ple_ms{0};
++  ProposalSource source{ProposalSource::None};
+ };
+ 
+ struct ShapeCount {
+@@ -94,6 +99,8 @@ struct Report {
+   std::uint32_t context_depth{0};
+   std::uint32_t draft_max{0};
+   double avg_draft_depth{0};
++  double mtp_avg_draft_depth{0};
++  double lookup_avg_draft_depth{0};
+   double catchup_ms{0};
+   double proposal_ms{0};
+   double verification_ms{0};
+@@ -117,7 +124,29 @@ struct Report {
+   std::uint64_t verify_certificate_fallbacks{0};
+   std::uint64_t verify_unsupported_sampler_fallbacks{0};
+   std::uint64_t verify_rejection_frontier_downloads{0};
++  std::uint64_t mtp_cycles{0};
++  std::uint64_t mtp_drafted{0};
++  std::uint64_t mtp_accepted{0};
++  std::uint64_t lookup_cycles{0};
++  std::uint64_t lookup_drafted{0};
++  std::uint64_t lookup_accepted{0};
++  std::uint64_t mtp_output_tokens{0};
++  std::uint64_t lookup_output_tokens{0};
++  double mtp_proposal_ms{0};
++  double mtp_verification_ms{0};
++  double mtp_total_cycle_ms{0};
++  double lookup_proposal_ms{0};
++  double lookup_verification_ms{0};
++  double lookup_total_cycle_ms{0};
++  std::uint64_t proposed_per_position[kDepths - 1]{};
++  std::uint64_t accepted_per_position[kDepths - 1]{};
++  std::uint64_t mtp_proposed_per_position[kDepths - 1]{};
++  std::uint64_t mtp_accepted_per_position[kDepths - 1]{};
++  std::uint64_t lookup_proposed_per_position[kDepths - 1]{};
++  std::uint64_t lookup_accepted_per_position[kDepths - 1]{};
+   DepthRow depths[kDepths]{};
++  DepthRow mtp_depths[kDepths]{};
++  DepthRow lookup_depths[kDepths]{};
+   std::vector<WindowRow> windows;
+   double qsa_indexer_ms{0};
+   double qsa_selector_ms{0};
+@@ -203,6 +232,18 @@ struct State {
+   std::uint64_t verify_certificate_fallbacks{0};
+   std::uint64_t verify_unsupported_sampler_fallbacks{0};
+   std::uint64_t verify_rejection_frontier_downloads{0};
++  std::uint64_t mtp_cycles{0};
++  std::uint64_t mtp_drafted{0};
++  std::uint64_t mtp_accepted{0};
++  std::uint64_t lookup_cycles{0};
++  std::uint64_t lookup_drafted{0};
++  std::uint64_t lookup_accepted{0};
++  std::uint64_t proposed_per_position[kDepths - 1]{};
++  std::uint64_t accepted_per_position[kDepths - 1]{};
++  std::uint64_t mtp_proposed_per_position[kDepths - 1]{};
++  std::uint64_t mtp_accepted_per_position[kDepths - 1]{};
++  std::uint64_t lookup_proposed_per_position[kDepths - 1]{};
++  std::uint64_t lookup_accepted_per_position[kDepths - 1]{};
+ 
+   double catchup_ms{0};
+   double proposal_ms{0};
+@@ -243,6 +284,8 @@ struct State {
+   std::unordered_map<ShapeKey, std::uint64_t, ShapeHash> shapes;
+ 
+   DepthRow depths[kDepths]{};
++  DepthRow mtp_depths[kDepths]{};
++  DepthRow lookup_depths[kDepths]{};
+   std::vector<CycleRec> cycles;
+   bool cycle_open{false};
+   double cycle_t0{0};
+@@ -310,6 +353,14 @@ inline void Reset() {
+   s.verify_certificate_fallbacks = 0;
+   s.verify_unsupported_sampler_fallbacks = 0;
+   s.verify_rejection_frontier_downloads = 0;
++  s.mtp_cycles = s.mtp_drafted = s.mtp_accepted = 0;
++  s.lookup_cycles = s.lookup_drafted = s.lookup_accepted = 0;
++  std::fill(std::begin(s.proposed_per_position), std::end(s.proposed_per_position), 0);
++  std::fill(std::begin(s.accepted_per_position), std::end(s.accepted_per_position), 0);
++  std::fill(std::begin(s.mtp_proposed_per_position), std::end(s.mtp_proposed_per_position), 0);
++  std::fill(std::begin(s.mtp_accepted_per_position), std::end(s.mtp_accepted_per_position), 0);
++  std::fill(std::begin(s.lookup_proposed_per_position), std::end(s.lookup_proposed_per_position), 0);
++  std::fill(std::begin(s.lookup_accepted_per_position), std::end(s.lookup_accepted_per_position), 0);
+   s.catchup_ms = s.proposal_ms = s.verify_forward_ms = s.plain_forward_ms = 0;
+   s.decision_ms = s.rollback_ms = s.sampling_ms = 0;
+   s.part_sampling = s.part_catchup = s.part_proposal = {};
+@@ -324,6 +375,8 @@ inline void Reset() {
+   s.lt_calls = s.lt_success = s.hipblas_fallback = s.hipblas_direct = 0;
+   s.shapes.clear();
+   for (auto& d : s.depths) d = {};
++  for (auto& d : s.mtp_depths) d = {};
++  for (auto& d : s.lookup_depths) d = {};
+   s.cycles.clear();
+   s.cycle_open = false;
+   s.disk_ns.store(0, std::memory_order_relaxed);
+@@ -557,7 +610,8 @@ inline void BeginCycle() {
+ inline void CancelCycle() { S().cycle_open = false; }
+ 
+ inline void EndCycle(std::uint32_t depth, std::uint32_t drafted,
+-                     std::uint32_t accepted, std::uint32_t output_tokens) {
++                     std::uint32_t accepted, std::uint32_t output_tokens,
++                     ProposalSource source = ProposalSource::Mtp) {
+   auto& s = S();
+   if (!s.cycle_open) return;
+   s.cycle_open = false;
+@@ -571,13 +625,56 @@ inline void EndCycle(std::uint32_t depth, std::uint32_t drafted,
+   cycle.verify_ms = s.verify_forward_ms - s.snap_verify;
+   cycle.qsa_ms = QsaTotal(s) - s.snap_qsa;
+   cycle.ple_ms = s.ple_wait_ms - s.snap_ple;
++  cycle.source = source;
+   s.cycles.push_back(cycle);
++  if (source == ProposalSource::Mtp) {
++    ++s.mtp_cycles;
++    s.mtp_drafted += drafted;
++    s.mtp_accepted += accepted;
++  } else if (source == ProposalSource::Lookup) {
++    ++s.lookup_cycles;
++    s.lookup_drafted += drafted;
++    s.lookup_accepted += accepted;
++  }
++  for (std::uint32_t position = 0;
++       position < std::min<std::uint32_t>(drafted, kDepths - 1); ++position) {
++    ++s.proposed_per_position[position];
++    if (accepted > position) ++s.accepted_per_position[position];
++    if (source == ProposalSource::Mtp) {
++      ++s.mtp_proposed_per_position[position];
++      if (accepted > position) ++s.mtp_accepted_per_position[position];
++    } else if (source == ProposalSource::Lookup) {
++      ++s.lookup_proposed_per_position[position];
++      if (accepted > position) ++s.lookup_accepted_per_position[position];
++    }
++  }
+   auto& row = s.depths[cycle.depth];
+   ++row.cycles;
+   row.cycle_ms += cycle.cycle_ms;
+   row.drafted += drafted;
+   row.accepted += accepted;
+   row.output_tokens += output_tokens;
++  row.proposal_ms += cycle.proposal_ms;
++  row.verify_ms += cycle.verify_ms;
++  if (source == ProposalSource::Mtp) {
++    auto& source_row = s.mtp_depths[cycle.depth];
++    ++source_row.cycles;
++    source_row.cycle_ms += cycle.cycle_ms;
++    source_row.drafted += drafted;
++    source_row.accepted += accepted;
++    source_row.output_tokens += output_tokens;
++    source_row.proposal_ms += cycle.proposal_ms;
++    source_row.verify_ms += cycle.verify_ms;
++  } else if (source == ProposalSource::Lookup) {
++    auto& source_row = s.lookup_depths[cycle.depth];
++    ++source_row.cycles;
++    source_row.cycle_ms += cycle.cycle_ms;
++    source_row.drafted += drafted;
++    source_row.accepted += accepted;
++    source_row.output_tokens += output_tokens;
++    source_row.proposal_ms += cycle.proposal_ms;
++    source_row.verify_ms += cycle.verify_ms;
++  }
+ }
+ 
+ inline double Exclusive(const Part& part) {
+@@ -613,13 +710,48 @@ inline Report BuildReport(double decode_ms) {
+       s.verify_unsupported_sampler_fallbacks;
+   report.verify_rejection_frontier_downloads =
+       s.verify_rejection_frontier_downloads;
++  report.mtp_cycles = s.mtp_cycles;
++  report.mtp_drafted = s.mtp_drafted;
++  report.mtp_accepted = s.mtp_accepted;
++  report.lookup_cycles = s.lookup_cycles;
++  report.lookup_drafted = s.lookup_drafted;
++  report.lookup_accepted = s.lookup_accepted;
++  std::copy(std::begin(s.proposed_per_position), std::end(s.proposed_per_position),
++            std::begin(report.proposed_per_position));
++  std::copy(std::begin(s.accepted_per_position), std::end(s.accepted_per_position),
++            std::begin(report.accepted_per_position));
++  std::copy(std::begin(s.mtp_proposed_per_position), std::end(s.mtp_proposed_per_position),
++            std::begin(report.mtp_proposed_per_position));
++  std::copy(std::begin(s.mtp_accepted_per_position), std::end(s.mtp_accepted_per_position),
++            std::begin(report.mtp_accepted_per_position));
++  std::copy(std::begin(s.lookup_proposed_per_position), std::end(s.lookup_proposed_per_position),
++            std::begin(report.lookup_proposed_per_position));
++  std::copy(std::begin(s.lookup_accepted_per_position), std::end(s.lookup_accepted_per_position),
++            std::begin(report.lookup_accepted_per_position));
+   report.catchup_ms = s.catchup_ms;
+   report.proposal_ms = s.proposal_ms;
+   report.verification_ms = s.verify_forward_ms;
+   report.rollback_ms = s.rollback_ms;
+   report.mtp_cycle_ms = s.catchup_ms + s.proposal_ms + s.verify_forward_ms +
+                         s.decision_ms + s.rollback_ms;
+-  for (int i = 0; i < kDepths; ++i) report.depths[i] = s.depths[i];
++  for (const auto& cycle : s.cycles) {
++    if (cycle.source == ProposalSource::Mtp) {
++      report.mtp_output_tokens += cycle.output_tokens;
++      report.mtp_proposal_ms += cycle.proposal_ms;
++      report.mtp_verification_ms += cycle.verify_ms;
++      report.mtp_total_cycle_ms += cycle.cycle_ms;
++    } else if (cycle.source == ProposalSource::Lookup) {
++      report.lookup_output_tokens += cycle.output_tokens;
++      report.lookup_proposal_ms += cycle.proposal_ms;
++      report.lookup_verification_ms += cycle.verify_ms;
++      report.lookup_total_cycle_ms += cycle.cycle_ms;
++    }
++  }
++  for (int i = 0; i < kDepths; ++i) {
++    report.depths[i] = s.depths[i];
++    report.mtp_depths[i] = s.mtp_depths[i];
++    report.lookup_depths[i] = s.lookup_depths[i];
++  }
+   double depth_sum = 0;
+   std::uint64_t depth_cycles = 0;
+   for (int i = 0; i < kDepths; ++i) {
+@@ -627,6 +759,18 @@ inline Report BuildReport(double decode_ms) {
+     depth_cycles += s.depths[i].cycles;
+   }
+   report.avg_draft_depth = depth_cycles ? depth_sum / static_cast<double>(depth_cycles) : 0;
++  double mtp_depth_sum = 0;
++  double lookup_depth_sum = 0;
++  std::uint64_t mtp_depth_cycles = 0;
++  std::uint64_t lookup_depth_cycles = 0;
++  for (int i = 0; i < kDepths; ++i) {
++    mtp_depth_sum += static_cast<double>(i) * static_cast<double>(s.mtp_depths[i].cycles);
++    mtp_depth_cycles += s.mtp_depths[i].cycles;
++    lookup_depth_sum += static_cast<double>(i) * static_cast<double>(s.lookup_depths[i].cycles);
++    lookup_depth_cycles += s.lookup_depths[i].cycles;
++  }
++  report.mtp_avg_draft_depth = mtp_depth_cycles ? mtp_depth_sum / static_cast<double>(mtp_depth_cycles) : 0;
++  report.lookup_avg_draft_depth = lookup_depth_cycles ? lookup_depth_sum / static_cast<double>(lookup_depth_cycles) : 0;
+ 
+   std::uint32_t cursor = 0;
+   double wall = 0;
+@@ -736,7 +880,7 @@ inline Report BuildReport(double decode_ms) {
+                                     s.ple_wait_ms, rollback_ex, sampling, sync_accounted,
+                                     other};
+   const char* names[kStageCount] = {
+-      "Target/trunk", "MTP proposal", "MTP verification", "QSA",
++      "Target/trunk", "Spec proposal", "Spec verification", "QSA",
+       "PLE wait",     "Rollback",      "Sampling",         "Synchronization",
+       "Other"};
+   for (int i = 0; i < kStageCount; ++i) {
+diff --git a/src/native/main.cpp b/src/native/main.cpp
+index 6a0cf59..bd1b0dd 100644
+--- a/src/native/main.cpp
++++ b/src/native/main.cpp
+@@ -52,7 +52,7 @@ using gufo::json::Value;
+ 
+ namespace {
+ 
+-constexpr std::string_view kRuntimeRevision = "fnv-exact-frontier-draft256-v7";
++constexpr std::string_view kRuntimeRevision = "fnv-context-lookup-economics-v8";
+ 
+ struct Config {
+   std::string model;
+@@ -63,6 +63,13 @@ struct Config {
+   std::uint32_t context{131072};
+   std::uint32_t draft_max{7};
+   float draft_confidence{0.0F};
++  bool context_lookup{true};
++  std::uint32_t context_lookup_min_ngram{3};
++  std::uint32_t context_lookup_max_ngram{6};
++  std::uint32_t context_lookup_window{32768};
++  std::uint32_t context_lookup_min_draft{2};
++  bool memory_guard{true};
++  double memory_guard_min_available_gib{8.0};
+   std::uint32_t sessions{1};
+   std::size_t default_max_tokens{4096};
+   bool thinking{true};
+@@ -111,6 +118,16 @@ struct Metrics {
+   std::uint64_t compact_frontier_samples{0};
+   std::uint64_t compact_frontier_fallbacks{0};
+   std::uint64_t mtp_fresh_resets{0};
++  std::uint64_t mtp_drafted{0};
++  std::uint64_t mtp_accepted{0};
++  std::uint64_t lookup_cycles{0};
++  std::uint64_t lookup_drafted{0};
++  std::uint64_t lookup_accepted{0};
++  bool context_lookup_enabled{true};
++  double lookup_avg_ngram{0};
++  double lookup_avg_distance{0};
++  std::uint64_t memory_available_bytes{0};
++  std::uint64_t memory_commit_available_bytes{0};
+   struct Window {
+     std::uint32_t token_lo{0};
+     std::uint32_t token_hi{0};
+@@ -224,6 +241,13 @@ Config LoadConfig(const fs::path& path) {
+   c.context = static_cast<std::uint32_t>(root.member_size("context", c.context));
+   c.draft_max = static_cast<std::uint32_t>(root.member_size("draft_max", c.draft_max));
+   c.draft_confidence = static_cast<float>(root.member_double("draft_confidence", c.draft_confidence));
++  if (const auto* v = root.find("context_lookup"); v && v->is_bool()) c.context_lookup = v->as_bool();
++  c.context_lookup_min_ngram = static_cast<std::uint32_t>(root.member_size("context_lookup_min_ngram", c.context_lookup_min_ngram));
++  c.context_lookup_max_ngram = static_cast<std::uint32_t>(root.member_size("context_lookup_max_ngram", c.context_lookup_max_ngram));
++  c.context_lookup_window = static_cast<std::uint32_t>(root.member_size("context_lookup_window", c.context_lookup_window));
++  c.context_lookup_min_draft = static_cast<std::uint32_t>(root.member_size("context_lookup_min_draft", c.context_lookup_min_draft));
++  if (const auto* v = root.find("memory_guard"); v && v->is_bool()) c.memory_guard = v->as_bool();
++  c.memory_guard_min_available_gib = root.member_double("memory_guard_min_available_gib", c.memory_guard_min_available_gib);
+   c.sessions = static_cast<std::uint32_t>(root.member_size("sessions", c.sessions));
+   c.default_max_tokens = root.member_size("default_max_tokens", c.default_max_tokens);
+   if (const auto* v = root.find("thinking"); v && v->is_bool()) c.thinking = v->as_bool();
+@@ -243,6 +267,16 @@ Config LoadConfig(const fs::path& path) {
+     throw std::runtime_error("context/draft_max is invalid");
+   if (c.draft_confidence < 0.0F || c.draft_confidence > 1.0F)
+     throw std::runtime_error("draft_confidence must be from 0 to 1");
++  if (c.context_lookup &&
++      (c.context_lookup_min_ngram < 2 ||
++       c.context_lookup_max_ngram < c.context_lookup_min_ngram ||
++       c.context_lookup_max_ngram > 32 || c.context_lookup_min_draft == 0 ||
++       c.context_lookup_min_draft > gufo::models::qwen38_flash_next::kMaxMtpDraftTokens))
++    throw std::runtime_error("context lookup settings are invalid");
++  if (!std::isfinite(c.memory_guard_min_available_gib) ||
++      c.memory_guard_min_available_gib < 0.0 ||
++      c.memory_guard_min_available_gib > 128.0)
++    throw std::runtime_error("memory_guard_min_available_gib is invalid");
+   if (c.sessions != 1)
+     throw std::runtime_error("this Windows server currently supports sessions=1; Gufo batching remains in the engine for a later scheduler layer");
+   return c;
+@@ -520,6 +554,7 @@ std::string FormatEffectiveSettings(const Metrics& m) {
+   o << "Repeat last N: " << m.repeat_last_n << "\n";
+   o << "MTP draft max: " << m.draft_max << "\n";
+   o << "MTP draft confidence: " << FormatFixed(m.draft_confidence, 2) << "\n";
++  o << "Context lookup: " << (m.context_lookup_enabled ? "ON (native exact-verification lane)" : "OFF") << "\n";
+   o << "MTP cost profile: Gufo calibrated\n";
+   o << "MTP draft candidate support: 256\n";
+   o << "Context: " << m.context_capacity << "\n\n";
+@@ -548,14 +583,27 @@ std::string FormatProfile(const Metrics& m) {
+   o << "Context capacity              " << p.context_capacity << "\n";
+   o << "Context depth at start        " << p.context_depth << "\n\n";
+   o << FormatEffectiveSettings(m);
+-  o << "MTP\n";
++  o << "SPECULATION\n";
+   o << "Draft max                     " << p.draft_max << "\n";
+   o << "Avg chosen draft depth        " << FormatFixed(p.avg_draft_depth, 2) << "\n";
++  o << "MTP-only avg draft depth      " << FormatFixed(p.mtp_avg_draft_depth, 2) << "\n";
++  o << "Lookup avg draft depth        " << FormatFixed(p.lookup_avg_draft_depth, 2) << "\n";
+   o << "Drafted tokens                " << m.draft_tokens << "\n";
+   o << "Accepted tokens               " << m.draft_accepted << "\n";
+   o << "Rejected tokens               " << static_cast<unsigned long long>(rejected) << "\n";
+   o << "Acceptance                    " << FormatFixed(m.draft_acceptance * 100.0, 1) << "%\n";
+   o << "Accepted / output token       " << FormatFixed(per_out, 3) << "\n";
++  const double mtp_acceptance = m.mtp_drafted ? static_cast<double>(m.mtp_accepted) / static_cast<double>(m.mtp_drafted) : 0.0;
++  const double lookup_acceptance = m.lookup_drafted ? static_cast<double>(m.lookup_accepted) / static_cast<double>(m.lookup_drafted) : 0.0;
++  o << "MTP-only drafted              " << m.mtp_drafted << "\n";
++  o << "MTP-only accepted             " << m.mtp_accepted << "\n";
++  o << "MTP-only acceptance           " << FormatFixed(mtp_acceptance * 100.0, 1) << "%\n";
++  o << "Lookup cycles                 " << m.lookup_cycles << "\n";
++  o << "Lookup drafted                " << m.lookup_drafted << "\n";
++  o << "Lookup accepted               " << m.lookup_accepted << "\n";
++  o << "Lookup acceptance             " << FormatFixed(lookup_acceptance * 100.0, 1) << "%\n";
++  o << "Lookup avg n-gram             " << FormatFixed(m.lookup_avg_ngram, 2) << "\n";
++  o << "Lookup avg source distance    " << FormatFixed(m.lookup_avg_distance, 1) << " tokens\n";
+   o << "MTP draft confidence           " << FormatFixed(m.draft_confidence, 2) << "\n";
+   o << "MTP cost profile              Gufo calibrated\n";
+   o << "MTP draft candidate support   256\n";
+@@ -564,12 +612,58 @@ std::string FormatProfile(const Metrics& m) {
+   o << "Frontier certificate fallbacks " << m.compact_frontier_fallbacks << "\n";
+   o << "MTP fresh-state resets         " << m.mtp_fresh_resets << "\n";
+   o << "Draft confidence applies to sampled MTP. Greedy drafts are unchanged.\n";
+-  o << "MTP catch-up ms               " << FormatFixed(p.catchup_ms, 1) << "\n";
+-  o << "MTP proposal/draft ms         " << FormatFixed(p.proposal_ms, 1) << "\n";
+-  o << "Target verification ms        " << FormatFixed(p.verification_ms, 1) << "\n";
+-  o << "Rollback ms                   " << FormatFixed(p.rollback_ms, 1) << "\n";
+-  o << "Total MTP cycle ms            " << FormatFixed(p.mtp_cycle_ms, 1) << "\n";
+-  o << "HIP graph captures            " << p.graph_captures << "\n\n";
++  o << "All MTP-state catch-up ms     " << FormatFixed(p.catchup_ms, 1) << "\n";
++  o << "MTP prep/proposal ms          " << FormatFixed(p.mtp_proposal_ms, 1) << "\n";
++  o << "MTP target verification ms    " << FormatFixed(p.mtp_verification_ms, 1) << "\n";
++  o << "MTP speculative cycle wall ms " << FormatFixed(p.mtp_total_cycle_ms, 1) << "\n";
++  o << "Lookup prep/state ms          " << FormatFixed(p.lookup_proposal_ms, 1) << "\n";
++  o << "Lookup target verify ms       " << FormatFixed(p.lookup_verification_ms, 1) << "\n";
++  o << "Lookup speculative wall ms    " << FormatFixed(p.lookup_total_cycle_ms, 1) << "\n";
++  o << "All target verification ms    " << FormatFixed(p.verification_ms, 1) << "\n";
++  o << "All rollback ms               " << FormatFixed(p.rollback_ms, 1) << "\n";
++  o << "HIP graph captures            " << p.graph_captures << "\n";
++  const std::uint64_t rounds = p.mtp_cycles + p.lookup_cycles;
++  o << "Speculative rounds            " << rounds << "\n";
++  o << "MTP rounds                    " << p.mtp_cycles << "\n";
++  o << "MTP width proposed / round    "
++    << FormatFixed(p.mtp_cycles ? static_cast<double>(p.mtp_drafted) / p.mtp_cycles : 0.0, 2) << "\n";
++  o << "MTP yield emitted / round     "
++    << FormatFixed(p.mtp_cycles ? static_cast<double>(p.mtp_output_tokens) / p.mtp_cycles : 0.0, 2) << "\n";
++  o << "MTP verify ms / round         "
++    << FormatFixed(p.mtp_cycles ? p.mtp_verification_ms / p.mtp_cycles : 0.0, 2) << "\n";
++  o << "MTP verify ms / output        "
++    << FormatFixed(p.mtp_output_tokens ? p.mtp_verification_ms / p.mtp_output_tokens : 0.0, 3) << "\n";
++  o << "Lookup rounds                 " << p.lookup_cycles << "\n";
++  o << "Lookup width / round          "
++    << FormatFixed(p.lookup_cycles ? static_cast<double>(p.lookup_drafted) / p.lookup_cycles : 0.0, 2) << "\n";
++  o << "Lookup yield / round          "
++    << FormatFixed(p.lookup_cycles ? static_cast<double>(p.lookup_output_tokens) / p.lookup_cycles : 0.0, 2) << "\n";
++  o << "Lookup verify ms / round      "
++    << FormatFixed(p.lookup_cycles ? p.lookup_verification_ms / p.lookup_cycles : 0.0, 2) << "\n";
++  o << "Lookup verify ms / output     "
++    << FormatFixed(p.lookup_output_tokens ? p.lookup_verification_ms / p.lookup_output_tokens : 0.0, 3) << "\n";
++  const auto write_survival = [&](std::string_view label, const std::uint64_t* proposed,
++                                  const std::uint64_t* accepted) {
++    o << label;
++    bool any = false;
++    for (int i = 0; i < fnvprof::kDepths - 1; ++i) {
++      if (proposed[i] == 0) break;
++      if (any) o << ", ";
++      any = true;
++      o << (i + 1) << ":"
++        << FormatFixed(100.0 * static_cast<double>(accepted[i]) /
++                           static_cast<double>(proposed[i]),
++                       1)
++        << "%";
++    }
++    if (!any) o << "n/a";
++    o << "\n";
++  };
++  write_survival("MTP prefix survival           ", p.mtp_proposed_per_position,
++                 p.mtp_accepted_per_position);
++  write_survival("Lookup prefix survival        ", p.lookup_proposed_per_position,
++                 p.lookup_accepted_per_position);
++  o << "\n";
+   o << "Verification substages\n";
+   o << "VERIFY TRUNK ms               " << FormatFixed(p.verify_trunk_ms, 1) << "\n";
+   o << "HC HEAD ms                    " << FormatFixed(p.verify_hc_head_ms, 1) << "\n";
+@@ -590,17 +684,28 @@ std::string FormatProfile(const Metrics& m) {
+   o << "Rejection frontier downloads  " << p.verify_rejection_frontier_downloads << "\n";
+   o << "GPU substage event timings are eager-only; graph replay is marked incomplete. "
+        "Transfer/certificate counters remain complete.\n\n";
+-  o << "Draft depth\n";
+-  o << "depth  cycles      avg ms    accept    out tok/s\n";
+-  for (int depth = 0; depth < fnvprof::kDepths; ++depth) {
+-    const auto& row = p.depths[depth];
+-    const double avg = row.cycles ? row.cycle_ms / static_cast<double>(row.cycles) : 0;
+-    const double accept = row.drafted ? 100.0 * static_cast<double>(row.accepted) / static_cast<double>(row.drafted) : 0;
+-    const double tps = row.cycle_ms > 0 ? 1000.0 * static_cast<double>(row.output_tokens) / row.cycle_ms : 0;
+-    o << std::setw(5) << depth << std::setw(8) << row.cycles << std::setw(12) << FormatFixed(avg, 2)
+-      << std::setw(10) << (row.drafted ? FormatFixed(accept, 1) + "%" : std::string("n/a"))
+-      << std::setw(12) << FormatFixed(tps, 2) << "\n";
+-  }
++  const auto write_depth_table = [&](std::string_view title, const fnvprof::DepthRow* rows) {
++    o << title << "\n";
++    o << "depth  cycles      avg ms    accept    out tok/s  proposal/round  verify/round  verify/out\n";
++    for (int depth = 0; depth < fnvprof::kDepths; ++depth) {
++      const auto& row = rows[depth];
++      const double avg = row.cycles ? row.cycle_ms / static_cast<double>(row.cycles) : 0;
++      const double accept = row.drafted ? 100.0 * static_cast<double>(row.accepted) / static_cast<double>(row.drafted) : 0;
++      const double tps = row.cycle_ms > 0 ? 1000.0 * static_cast<double>(row.output_tokens) / row.cycle_ms : 0;
++      const double proposal_round = row.cycles ? row.proposal_ms / static_cast<double>(row.cycles) : 0;
++      const double verify_round = row.cycles ? row.verify_ms / static_cast<double>(row.cycles) : 0;
++      const double verify_out = row.output_tokens ? row.verify_ms / static_cast<double>(row.output_tokens) : 0;
++      o << std::setw(5) << depth << std::setw(8) << row.cycles << std::setw(12) << FormatFixed(avg, 2)
++        << std::setw(10) << (row.drafted ? FormatFixed(accept, 1) + "%" : std::string("n/a"))
++        << std::setw(12) << FormatFixed(tps, 2)
++        << std::setw(16) << FormatFixed(proposal_round, 2)
++        << std::setw(14) << FormatFixed(verify_round, 2)
++        << std::setw(12) << FormatFixed(verify_out, 3) << "\n";
++    }
++  };
++  write_depth_table("MTP draft depth", p.mtp_depths);
++  o << "\n";
++  write_depth_table("Lookup draft depth", p.lookup_depths);
+   o << "\n64-token windows\n";
+   o << "tokens        tok/s   accept   depth   draft ms  verify ms    QSA ms    PLE ms\n";
+   for (const auto& w : p.windows) {
+@@ -694,14 +799,25 @@ std::string FormatLastRequest(const Metrics& m) {
+   o << "Context capacity              " << m.context_capacity << "\n";
+   o << "Context depth at start        " << m.context_depth << "\n\n";
+   o << FormatEffectiveSettings(m);
+-  o << "MTP\n";
++  o << "SPECULATION\n";
+   o << "Draft max                     " << m.draft_max << "\n";
+   o << "Avg chosen draft depth        " << FormatFixed(m.avg_draft_depth, 2) << "\n";
+-  o << "Drafted tokens                " << m.draft_tokens << "\n";
+-  o << "Accepted tokens               " << m.draft_accepted << "\n";
+-  o << "Rejected tokens               " << static_cast<unsigned long long>(rejected) << "\n";
+-  o << "Acceptance                    " << FormatFixed(m.draft_acceptance * 100.0, 1) << "%\n";
++  o << "All speculative drafted       " << m.draft_tokens << "\n";
++  o << "All speculative accepted      " << m.draft_accepted << "\n";
++  o << "All speculative rejected      " << static_cast<unsigned long long>(rejected) << "\n";
++  o << "All speculative acceptance    " << FormatFixed(m.draft_acceptance * 100.0, 1) << "%\n";
+   o << "Accepted / output token       " << FormatFixed(per_out, 3) << "\n";
++  const double mtp_acceptance = m.mtp_drafted ? static_cast<double>(m.mtp_accepted) / static_cast<double>(m.mtp_drafted) : 0.0;
++  const double lookup_acceptance = m.lookup_drafted ? static_cast<double>(m.lookup_accepted) / static_cast<double>(m.lookup_drafted) : 0.0;
++  o << "MTP-only drafted              " << m.mtp_drafted << "\n";
++  o << "MTP-only accepted             " << m.mtp_accepted << "\n";
++  o << "MTP-only acceptance           " << FormatFixed(mtp_acceptance * 100.0, 1) << "%\n";
++  o << "Lookup cycles                 " << m.lookup_cycles << "\n";
++  o << "Lookup drafted                " << m.lookup_drafted << "\n";
++  o << "Lookup accepted               " << m.lookup_accepted << "\n";
++  o << "Lookup acceptance             " << FormatFixed(lookup_acceptance * 100.0, 1) << "%\n";
++  o << "Lookup avg n-gram             " << FormatFixed(m.lookup_avg_ngram, 2) << "\n";
++  o << "Lookup avg source distance    " << FormatFixed(m.lookup_avg_distance, 1) << " tokens\n";
+   o << "MTP draft confidence           " << FormatFixed(m.draft_confidence, 2) << "\n";
+   o << "Low-confidence draft stops     " << m.low_confidence_stops << "\n";
+   o << "Compact frontier samples       " << m.compact_frontier_samples << "\n";
+@@ -742,6 +858,18 @@ Value MetricsJson(const Metrics& m) {
+   v["compact_frontier_samples"] = static_cast<unsigned long long>(m.compact_frontier_samples);
+   v["compact_frontier_fallbacks"] = static_cast<unsigned long long>(m.compact_frontier_fallbacks);
+   v["mtp_fresh_resets"] = static_cast<unsigned long long>(m.mtp_fresh_resets);
++  v["mtp_draft_tokens"] = static_cast<unsigned long long>(m.mtp_drafted);
++  v["mtp_draft_tokens_accepted"] = static_cast<unsigned long long>(m.mtp_accepted);
++  v["mtp_acceptance"] = m.mtp_drafted ? static_cast<double>(m.mtp_accepted) / static_cast<double>(m.mtp_drafted) : 0.0;
++  v["lookup_cycles"] = static_cast<unsigned long long>(m.lookup_cycles);
++  v["lookup_draft_tokens"] = static_cast<unsigned long long>(m.lookup_drafted);
++  v["lookup_draft_tokens_accepted"] = static_cast<unsigned long long>(m.lookup_accepted);
++  v["lookup_acceptance"] = m.lookup_drafted ? static_cast<double>(m.lookup_accepted) / static_cast<double>(m.lookup_drafted) : 0.0;
++  v["lookup_avg_ngram"] = m.lookup_avg_ngram;
++  v["lookup_avg_source_distance"] = m.lookup_avg_distance;
++  v["context_lookup_active"] = m.context_lookup_enabled;
++  v["memory_available_bytes"] = static_cast<unsigned long long>(m.memory_available_bytes);
++  v["memory_commit_available_bytes"] = static_cast<unsigned long long>(m.memory_commit_available_bytes);
+   v["draft_tokens"] = static_cast<unsigned long long>(m.draft_tokens);
+   v["draft_tokens_accepted"] = static_cast<unsigned long long>(m.draft_accepted);
+   v["draft_tokens_rejected"] = static_cast<unsigned long long>(m.draft_tokens - m.draft_accepted);
+@@ -760,6 +888,7 @@ Value MetricsJson(const Metrics& m) {
+   effective["repeat_last_n"] = static_cast<unsigned long long>(m.repeat_last_n);
+   effective["draft_max"] = static_cast<unsigned long long>(m.draft_max);
+   effective["draft_confidence"] = m.draft_confidence;
++  effective["context_lookup"] = m.context_lookup_enabled;
+   effective["context"] = static_cast<unsigned long long>(m.context_capacity);
+   v["effective_settings"] = std::move(effective);
+   Value speed = Value::array();
+@@ -781,13 +910,67 @@ Value MetricsJson(const Metrics& m) {
+     const auto& p = m.profile;
+     Value mtp = Value::object();
+     mtp["draft_max"] = static_cast<unsigned long long>(p.draft_max);
+-    mtp["avg_draft_depth"] = p.avg_draft_depth;
++    mtp["avg_draft_depth"] = p.mtp_avg_draft_depth;
++    mtp["avg_cycle_draft_depth"] = p.avg_draft_depth;
++    mtp["avg_speculative_draft_depth"] = p.avg_draft_depth;
++    mtp["lookup_avg_draft_depth"] = p.lookup_avg_draft_depth;
+     mtp["catchup_ms"] = p.catchup_ms;
+     mtp["proposal_ms"] = p.proposal_ms;
+     mtp["verification_ms"] = p.verification_ms;
+     mtp["rollback_ms"] = p.rollback_ms;
+     mtp["cycle_ms"] = p.mtp_cycle_ms;
+     mtp["graph_captures"] = static_cast<unsigned long long>(p.graph_captures);
++    mtp["mtp_cycles"] = static_cast<unsigned long long>(p.mtp_cycles);
++    mtp["mtp_drafted"] = static_cast<unsigned long long>(p.mtp_drafted);
++    mtp["mtp_accepted"] = static_cast<unsigned long long>(p.mtp_accepted);
++    mtp["lookup_cycles"] = static_cast<unsigned long long>(p.lookup_cycles);
++    mtp["lookup_drafted"] = static_cast<unsigned long long>(p.lookup_drafted);
++    mtp["lookup_accepted"] = static_cast<unsigned long long>(p.lookup_accepted);
++    Value mtp_economics = Value::object();
++    mtp_economics["output_tokens"] = static_cast<unsigned long long>(p.mtp_output_tokens);
++    mtp_economics["proposal_ms"] = p.mtp_proposal_ms;
++    mtp_economics["verification_ms"] = p.mtp_verification_ms;
++    mtp_economics["cycle_wall_ms"] = p.mtp_total_cycle_ms;
++    mtp_economics["proposed_per_round"] = p.mtp_cycles ? static_cast<double>(p.mtp_drafted) / p.mtp_cycles : 0.0;
++    mtp_economics["emitted_per_round"] = p.mtp_cycles ? static_cast<double>(p.mtp_output_tokens) / p.mtp_cycles : 0.0;
++    mtp_economics["verify_ms_per_round"] = p.mtp_cycles ? p.mtp_verification_ms / p.mtp_cycles : 0.0;
++    mtp_economics["verify_ms_per_output_token"] = p.mtp_output_tokens ? p.mtp_verification_ms / p.mtp_output_tokens : 0.0;
++    mtp["mtp_economics"] = std::move(mtp_economics);
++    Value lookup_economics = Value::object();
++    lookup_economics["output_tokens"] = static_cast<unsigned long long>(p.lookup_output_tokens);
++    lookup_economics["proposal_ms"] = p.lookup_proposal_ms;
++    lookup_economics["verification_ms"] = p.lookup_verification_ms;
++    lookup_economics["cycle_wall_ms"] = p.lookup_total_cycle_ms;
++    lookup_economics["proposed_per_round"] = p.lookup_cycles ? static_cast<double>(p.lookup_drafted) / p.lookup_cycles : 0.0;
++    lookup_economics["emitted_per_round"] = p.lookup_cycles ? static_cast<double>(p.lookup_output_tokens) / p.lookup_cycles : 0.0;
++    lookup_economics["verify_ms_per_round"] = p.lookup_cycles ? p.lookup_verification_ms / p.lookup_cycles : 0.0;
++    lookup_economics["verify_ms_per_output_token"] = p.lookup_output_tokens ? p.lookup_verification_ms / p.lookup_output_tokens : 0.0;
++    mtp["lookup_economics"] = std::move(lookup_economics);
++    const std::uint64_t profile_rounds = p.mtp_cycles + p.lookup_cycles;
++    mtp["proposed_per_round"] = profile_rounds ? static_cast<double>(p.mtp_drafted + p.lookup_drafted) / static_cast<double>(profile_rounds) : 0.0;
++    mtp["verify_ms_per_round"] = profile_rounds ? p.verification_ms / static_cast<double>(profile_rounds) : 0.0;
++    mtp["verify_ms_per_output_token"] = m.completion_tokens ? p.verification_ms / static_cast<double>(m.completion_tokens) : 0.0;
++    const auto survival_json = [](const std::uint64_t* proposed,
++                                  const std::uint64_t* accepted) {
++      Value survival = Value::array();
++      for (int i = 0; i < fnvprof::kDepths - 1; ++i) {
++        if (proposed[i] == 0) break;
++        Value item = Value::object();
++        item["position"] = i + 1;
++        item["proposed"] = static_cast<unsigned long long>(proposed[i]);
++        item["accepted"] = static_cast<unsigned long long>(accepted[i]);
++        item["survival"] = static_cast<double>(accepted[i]) /
++                           static_cast<double>(proposed[i]);
++        survival.push_back(std::move(item));
++      }
++      return survival;
++    };
++    mtp["prefix_survival"] =
++        survival_json(p.mtp_proposed_per_position, p.mtp_accepted_per_position);
++    mtp["lookup_prefix_survival"] = survival_json(
++        p.lookup_proposed_per_position, p.lookup_accepted_per_position);
++    mtp["all_speculative_prefix_survival"] =
++        survival_json(p.proposed_per_position, p.accepted_per_position);
+     Value verification = Value::object();
+     verification["trunk_ms"] = p.verify_trunk_ms;
+     verification["hc_head_ms"] = p.verify_hc_head_ms;
+@@ -809,20 +992,29 @@ Value MetricsJson(const Metrics& m) {
+     verification["rejection_frontier_downloads"] =
+         static_cast<unsigned long long>(p.verify_rejection_frontier_downloads);
+     mtp["verification"] = std::move(verification);
+-    Value depths = Value::array();
+-    for (int depth = 0; depth < fnvprof::kDepths; ++depth) {
+-      const auto& row = p.depths[depth];
+-      Value item = Value::object();
+-      item["depth"] = depth;
+-      item["cycles"] = static_cast<unsigned long long>(row.cycles);
+-      item["avg_cycle_ms"] = row.cycles ? row.cycle_ms / static_cast<double>(row.cycles) : 0;
+-      item["drafted"] = static_cast<unsigned long long>(row.drafted);
+-      item["accepted"] = static_cast<unsigned long long>(row.accepted);
+-      item["acceptance"] = row.drafted ? static_cast<double>(row.accepted) / static_cast<double>(row.drafted) : 0;
+-      item["output_tokens_per_second"] = row.cycle_ms > 0 ? 1000.0 * static_cast<double>(row.output_tokens) / row.cycle_ms : 0;
+-      depths.push_back(std::move(item));
+-    }
+-    mtp["depths"] = std::move(depths);
++    const auto depth_json = [](const fnvprof::DepthRow* rows) {
++      Value depths = Value::array();
++      for (int depth = 0; depth < fnvprof::kDepths; ++depth) {
++        const auto& row = rows[depth];
++        Value item = Value::object();
++        item["depth"] = depth;
++        item["cycles"] = static_cast<unsigned long long>(row.cycles);
++        item["avg_cycle_ms"] = row.cycles ? row.cycle_ms / static_cast<double>(row.cycles) : 0;
++        item["drafted"] = static_cast<unsigned long long>(row.drafted);
++        item["accepted"] = static_cast<unsigned long long>(row.accepted);
++        item["acceptance"] = row.drafted ? static_cast<double>(row.accepted) / static_cast<double>(row.drafted) : 0;
++        item["output_tokens"] = static_cast<unsigned long long>(row.output_tokens);
++        item["output_tokens_per_second"] = row.cycle_ms > 0 ? 1000.0 * static_cast<double>(row.output_tokens) / row.cycle_ms : 0;
++        item["proposal_ms_per_round"] = row.cycles ? row.proposal_ms / static_cast<double>(row.cycles) : 0.0;
++        item["verify_ms_per_round"] = row.cycles ? row.verify_ms / static_cast<double>(row.cycles) : 0.0;
++        item["verify_ms_per_output_token"] = row.output_tokens ? row.verify_ms / static_cast<double>(row.output_tokens) : 0.0;
++        depths.push_back(std::move(item));
++      }
++      return depths;
++    };
++    mtp["depths"] = depth_json(p.depths);
++    mtp["mtp_depths"] = depth_json(p.mtp_depths);
++    mtp["lookup_depths"] = depth_json(p.lookup_depths);
+     v["mtp"] = std::move(mtp);
+     Value rich = Value::array();
+     for (const auto& w : p.windows) {
+@@ -897,15 +1089,39 @@ Value MetricsJson(const Metrics& m) {
+   return v;
+ }
+ 
++struct WindowsMemoryHeadroom {
++  std::uint64_t available_physical{0};
++  std::uint64_t available_commit{0};
++};
++
++WindowsMemoryHeadroom QueryWindowsMemoryHeadroom() {
++  MEMORYSTATUSEX status{};
++  status.dwLength = sizeof(status);
++  if (!GlobalMemoryStatusEx(&status)) return {};
++  return {static_cast<std::uint64_t>(status.ullAvailPhys),
++          static_cast<std::uint64_t>(status.ullAvailPageFile)};
++}
++
++std::uint64_t WindowsAvailableMemoryBytes() {
++  return QueryWindowsMemoryHeadroom().available_physical;
++}
++
++
+ class Runtime {
+  public:
+   explicit Runtime(Config cfg) : cfg_(std::move(cfg)) {
++    CheckMemoryFloor("before model load");
+     gufo::models::qwen38_flash_next::ModelOptions options;
+     options.max_context = cfg_.context;
+     options.mtp_model_path = cfg_.mtp;
+     options.max_draft_tokens = cfg_.draft_max;
+     options.vision_model_path = cfg_.mmproj;
+     options.decode_concurrency = cfg_.sessions;
++    options.context_lookup = cfg_.context_lookup;
++    options.context_lookup_min_ngram = cfg_.context_lookup_min_ngram;
++    options.context_lookup_max_ngram = cfg_.context_lookup_max_ngram;
++    options.context_lookup_window = cfg_.context_lookup_window;
++    options.context_lookup_min_draft = cfg_.context_lookup_min_draft;
+     std::string error;
+     const auto start = Clock::now();
+     model_ = qfn::Load(cfg_.model, options, &error);
+@@ -914,6 +1130,7 @@ class Runtime {
+                                        : gufo::core::SessionMode::kAutoregressive;
+     session_ = model_->CreateSession(mode, cfg_.context, &error);
+     if (!session_) throw std::runtime_error("session creation failed: " + error);
++    CheckMemoryFloor("after model load");
+     load_seconds_ = std::chrono::duration<double>(Clock::now() - start).count();
+     std::cout << "Loaded " << model_->ModelName() << " in " << std::fixed << std::setprecision(2)
+               << load_seconds_ << "s; resident " << (model_->ResidentBytes() / double(1ULL<<30))
+@@ -954,6 +1171,7 @@ class Runtime {
+       }
+     } profile_guard(profile);
+     std::lock_guard generation_lock(generation_mutex_);
++    CheckMemoryFloor("request start");
+     if (!session_->IsValid()) {
+       std::string error;
+       const auto mode = model_->HasMtp() ? gufo::core::SessionMode::kSpeculative
+@@ -1016,6 +1234,7 @@ class Runtime {
+       window_start = now;
+     };
+     while (!stop && generated.size() < max_tokens) {
++      if ((generated.size() & 31U) == 0) CheckMemoryFloor("generation");
+       QfnSession::DecodeResult step;
+       const auto remaining = max_tokens - generated.size();
+       if (!session_->DecodeStep(remaining, sampler, &step, &error, true))
+@@ -1081,6 +1300,19 @@ class Runtime {
+     m.compact_frontier_samples = session_->Statistics().compact_frontier_samples - stats0.compact_frontier_samples;
+     m.compact_frontier_fallbacks = session_->Statistics().compact_frontier_fallbacks - stats0.compact_frontier_fallbacks;
+     m.mtp_fresh_resets = session_->MtpFreshResets();
++    m.mtp_drafted = stats1.mtp_drafted - stats0.mtp_drafted;
++    m.mtp_accepted = stats1.mtp_accepted - stats0.mtp_accepted;
++    m.lookup_cycles = stats1.lookup_cycles - stats0.lookup_cycles;
++    m.lookup_drafted = stats1.lookup_drafted - stats0.lookup_drafted;
++    m.lookup_accepted = stats1.lookup_accepted - stats0.lookup_accepted;
++    m.context_lookup_enabled = cfg_.context_lookup && model_->HasMtp();
++    const auto lookup_ngram_sum = stats1.lookup_ngram_sum - stats0.lookup_ngram_sum;
++    const auto lookup_distance_sum = stats1.lookup_distance_sum - stats0.lookup_distance_sum;
++    m.lookup_avg_ngram = m.lookup_cycles ? static_cast<double>(lookup_ngram_sum) / static_cast<double>(m.lookup_cycles) : 0.0;
++    m.lookup_avg_distance = m.lookup_cycles ? static_cast<double>(lookup_distance_sum) / static_cast<double>(m.lookup_cycles) : 0.0;
++    const auto memory_headroom = QueryWindowsMemoryHeadroom();
++    m.memory_available_bytes = memory_headroom.available_physical;
++    m.memory_commit_available_bytes = memory_headroom.available_commit;
+     m.request_windows = std::move(request_windows);
+     m.speed_windows = std::move(windows);
+     m.has_request = true;
+@@ -1096,6 +1328,31 @@ class Runtime {
+   }
+ 
+  private:
++  [[nodiscard]] std::uint64_t MemoryFloorBytes() const noexcept {
++    return static_cast<std::uint64_t>(cfg_.memory_guard_min_available_gib *
++                                      static_cast<double>(1ULL << 30));
++  }
++  void CheckMemoryFloor(std::string_view stage) const {
++    if (!cfg_.memory_guard) return;
++    const auto memory = QueryWindowsMemoryHeadroom();
++    const auto floor = MemoryFloorBytes();
++    const bool physical_low =
++        memory.available_physical != 0 && memory.available_physical < floor;
++    const bool commit_low =
++        memory.available_commit != 0 && memory.available_commit < floor;
++    if (physical_low || commit_low) {
++      std::ostringstream message;
++      message << "Windows memory guard stopped " << stage << ": "
++              << std::fixed << std::setprecision(2)
++              << (memory.available_physical / static_cast<double>(1ULL << 30))
++              << " GiB physical available, "
++              << (memory.available_commit / static_cast<double>(1ULL << 30))
++              << " GiB commit headroom; floor is "
++              << cfg_.memory_guard_min_available_gib << " GiB";
++      throw std::runtime_error(message.str());
++    }
++  }
++
+   Config cfg_;
+   std::shared_ptr<qfn> model_;
+   std::unique_ptr<QfnSession> session_;
+@@ -1355,11 +1612,11 @@ std::string DashboardHtml(const Runtime& runtime) {
+ </div></div>
+ <script>
+ const base=location.origin;
+-async function refresh(){try{const h=await fetch(base+'/health').then(r=>r.json());model.textContent=h.model||'-';mtp.textContent=h.mtp?'ON':'OFF';vision.textContent=h.vision?'ON':'OFF';statusPill.textContent='online';statusPill.className='pill ok';api.textContent=base+'/v1';const m=await fetch(base+'/metrics').then(r=>r.json());metrics.textContent=JSON.stringify(m,null,2)}catch(e){statusPill.textContent='offline';statusPill.className='pill bad'}}
++async function refresh(){try{const h=await fetch(base+'/health').then(r=>r.json());model.textContent=h.model||'-';mtp.textContent=h.mtp?('ON · lookup '+(h.context_lookup_active?'ON':'OFF')):'OFF';vision.textContent=h.vision?'ON':'OFF';statusPill.textContent='online';statusPill.className='pill ok';api.textContent=base+'/v1';const m=await fetch(base+'/metrics').then(r=>r.json());metrics.textContent=JSON.stringify(m,null,2)}catch(e){statusPill.textContent='offline';statusPill.className='pill bad'}}
+ async function studioSettings(){const h=await fetch(base+'/health').then(r=>r.json());const s=h.sampling||{};return{temperature:s.temperature,top_p:s.top_p,top_k:s.top_k,min_p:s.min_p,repeat_penalty:s.repeat_penalty,repeat_last_n:s.repeat_last_n,chat_template_kwargs:{enable_thinking:!!h.thinking,preserve_thinking:!!h.thinking&&!!h.preserve_thinking,reasoning_effort:h.reasoning_effort||'medium'}}}
+ async function chat(){chatOut.textContent='working…';try{const settings=await studioSettings();const body={model:'local',messages:[{role:'user',content:prompt.value}],max_tokens:+maxTokens.value,stream:false,...settings};const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);chatOut.textContent=j.choices?.[0]?.message?.content||JSON.stringify(j,null,2);refresh()}catch(e){chatOut.textContent='ERROR: '+e.message}}
+ function clearOut(){chatOut.textContent=''}
+-async function bench(){benchOut.textContent='warming up…';try{const settings=await studioSettings();await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:'Reply with one short sentence about speculative decoding.'}],max_tokens:24,stream:false,...settings})});benchOut.textContent='benchmarking…';const longPrompt=('Explain speculative decoding, memory bandwidth, recurrent state, and long-context inference in technically precise, non-repetitive prose. ').repeat(48);const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:longPrompt}],max_tokens:+benchTokens.value,stream:false,flashnext_profile:true,...settings})});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);const m=j.usage?.flashnext_velocity||{};prefill.textContent=(m.prefill_tokens_per_second||0).toFixed(2)+' tok/s';decode.textContent=(m.completion_tokens_per_second||0).toFixed(2)+' tok/s';accept.textContent=((m.draft_acceptance||0)*100).toFixed(1)+'%';benchOut.textContent=m.profile_text||('64-token windows: '+JSON.stringify(m.speed_windows_64_tokens||[])+'\nDraft: '+(m.draft_tokens_accepted||0)+'/'+(m.draft_tokens||0));refresh()}catch(e){benchOut.textContent='ERROR: '+e.message}}
++async function bench(){benchOut.textContent='warming up…';try{const settings=await studioSettings();await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:'Reply with one short sentence about speculative decoding.'}],max_tokens:24,stream:false,...settings})});benchOut.textContent='benchmarking…';const longPrompt=('Explain speculative decoding, memory bandwidth, recurrent state, and long-context inference in technically precise, non-repetitive prose. ').repeat(48);const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:longPrompt}],max_tokens:+benchTokens.value,stream:false,flashnext_profile:true,...settings})});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);const m=j.usage?.flashnext_velocity||{};prefill.textContent=(m.prefill_tokens_per_second||0).toFixed(2)+' tok/s';decode.textContent=(m.completion_tokens_per_second||0).toFixed(2)+' tok/s';accept.textContent=(((m.mtp_acceptance!==undefined?m.mtp_acceptance:m.draft_acceptance)||0)*100).toFixed(1)+'%';benchOut.textContent=m.profile_text||('64-token windows: '+JSON.stringify(m.speed_windows_64_tokens||[])+'\nDraft: '+(m.draft_tokens_accepted||0)+'/'+(m.draft_tokens||0));refresh()}catch(e){benchOut.textContent='ERROR: '+e.message}}
+ refresh();setInterval(refresh,5000);
+ </script></body></html>)FNVHTML";
+   return html.str();
+@@ -1374,14 +1631,14 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
+       SendResponse(client, {200,"text/html; charset=utf-8",DashboardHtml(runtime)}); closesocket(client); return;
+     }
+     if (request->method == "GET" && request->path == "/v1") {
+-      Value v = Value::object(); v["name"] = "FlashNextVelocity"; v["version"] = "1.0.3";
++      Value v = Value::object(); v["name"] = "FlashNextVelocity"; v["version"] = "1.0.5";
+       Value endpoints = Value::array(); endpoints.push_back("/v1/models"); endpoints.push_back("/v1/chat/completions"); endpoints.push_back("/v1/completions"); endpoints.push_back("/health"); endpoints.push_back("/metrics"); endpoints.push_back("/dashboard"); v["endpoints"] = endpoints;
+       SendResponse(client, {200,"application/json",v.dump()}); closesocket(client); return;
+     }
+     if (request->method == "GET" && request->path == "/health") {
+       Value v = Value::object();
+       v["status"] = "ok";
+-      v["version"] = "1.0.3";
++      v["version"] = "1.0.5";
+       v["model"] = runtime.model()->ModelName();
+       v["mtp"] = runtime.model()->HasMtp();
+       v["vision"] = static_cast<bool>(runtime.model()->VisionEncoder());
+@@ -1398,6 +1655,17 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
+       v["context"] = static_cast<unsigned long long>(runtime.cfg().context);
+       v["draft_max"] = static_cast<unsigned long long>(runtime.cfg().draft_max);
+       v["draft_confidence"] = runtime.cfg().draft_confidence;
++      v["context_lookup"] = runtime.cfg().context_lookup;
++      v["context_lookup_active"] = runtime.cfg().context_lookup && runtime.model()->HasMtp();
++      v["context_lookup_min_ngram"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_min_ngram);
++      v["context_lookup_max_ngram"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_max_ngram);
++      v["context_lookup_window"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_window);
++      v["context_lookup_min_draft"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_min_draft);
++      v["memory_guard"] = runtime.cfg().memory_guard;
++      v["memory_guard_min_available_gib"] = runtime.cfg().memory_guard_min_available_gib;
++      const auto memory = QueryWindowsMemoryHeadroom();
++      v["memory_available_bytes"] = static_cast<unsigned long long>(memory.available_physical);
++      v["memory_commit_available_bytes"] = static_cast<unsigned long long>(memory.available_commit);
+       v["sessions"] = static_cast<unsigned long long>(runtime.cfg().sessions);
+       v["default_max_tokens"] = static_cast<unsigned long long>(runtime.cfg().default_max_tokens);
+       v["thinking"] = runtime.cfg().thinking;
+diff --git a/tests/native_unit_tests.cpp b/tests/native_unit_tests.cpp
+new file mode 100644
+index 0000000..cf6952d
+--- /dev/null
++++ b/tests/native_unit_tests.cpp
+@@ -0,0 +1,113 @@
++#include <cstdint>
++#include <iostream>
++#include <stdexcept>
++#include <string_view>
++#include <vector>
++
++#include "src/models/qwen38_flash_next/context_lookup.hpp"
++#include "bench_profile.hpp"
++
++namespace qfn = gufo::models::qwen38_flash_next;
++
++static void Check(bool condition, std::string_view message) {
++  if (!condition) throw std::runtime_error(std::string(message));
++}
++
++static void TestContextLookup() {
++  {
++    const std::vector<std::int32_t> history{1, 2, 3, 4, 5, 6, 9, 1, 2, 3};
++    const auto match = qfn::FindContextLookup(history, 4, 3, 3, 6, 32768, 2);
++    Check(match.has_value(), "expected four-token lookup match");
++    Check(match->ngram == 4, "wrong lookup n-gram order");
++    Check(match->continuation == std::vector<std::int32_t>({5, 6, 9}),
++          "wrong lookup continuation");
++    Check(match->source_end == 3, "wrong lookup source position");
++    Check(match->distance == 6, "wrong lookup source distance");
++  }
++  {
++    // Search newest-first when identical n-grams have different continuations.
++    const std::vector<std::int32_t> history{
++        7, 8, 9, 4, 10, 11, 0, 7, 8, 9, 4, 20, 21, 0, 7, 8, 9};
++    const auto match = qfn::FindContextLookup(history, 4, 2, 4, 4, 0, 2);
++    Check(match.has_value(), "expected newest lookup match");
++    Check(match->source_end == 10, "lookup did not choose newest match");
++    Check(match->continuation == std::vector<std::int32_t>({20, 21}),
++          "newest match continuation is wrong");
++  }
++  {
++    // Tiny histories must fail safely without unsigned-index underflow.
++    const std::vector<std::int32_t> history{7};
++    Check(!qfn::FindContextLookup(history, 6, 2, 2, 5, 0, 1),
++          "tiny-history lookup should not produce a match");
++  }
++  {
++    // A bounded search must not leak beyond the configured history window.
++    const std::vector<std::int32_t> history{1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3};
++    Check(!qfn::FindContextLookup(history, 4, 2, 4, 4, 5, 2),
++          "lookup escaped configured search window");
++  }
++  {
++    // Reject a candidate that cannot supply the requested minimum draft.
++    const std::vector<std::int32_t> history{1, 4, 1};
++    Check(!qfn::FindContextLookup(history, 4, 3, 2, 2, 0, 2),
++          "lookup ignored minimum draft length");
++  }
++  {
++    // Fall back from an unavailable longer n-gram to a valid shorter one.
++    const std::vector<std::int32_t> history{8, 2, 3, 4, 5, 6, 7, 9, 2, 3};
++    const auto match = qfn::FindContextLookup(history, 4, 2, 3, 5, 0, 2);
++    Check(match.has_value(), "expected shorter n-gram fallback");
++    Check(match->ngram == 3, "wrong fallback n-gram order");
++    Check(match->continuation == std::vector<std::int32_t>({5, 6}),
++          "wrong fallback continuation");
++  }
++}
++
++static void TestProposalSourceTelemetry() {
++  fnvprof::Reset();
++  fnvprof::SetEnabled(true);
++  fnvprof::SetPhase(fnvprof::Phase::Decode);
++
++  fnvprof::BeginCycle();
++  fnvprof::EndCycle(2, 2, 1, 2, fnvprof::ProposalSource::Mtp);
++  fnvprof::BeginCycle();
++  fnvprof::EndCycle(3, 3, 3, 4, fnvprof::ProposalSource::Lookup);
++
++  const auto report = fnvprof::BuildReport(1.0);
++  Check(report.mtp_cycles == 1 && report.lookup_cycles == 1,
++        "proposal-source cycle split is wrong");
++  Check(report.mtp_drafted == 2 && report.mtp_accepted == 1,
++        "MTP counters are wrong");
++  Check(report.lookup_drafted == 3 && report.lookup_accepted == 3,
++        "lookup counters are wrong");
++  Check(report.mtp_output_tokens == 2 && report.lookup_output_tokens == 4,
++        "source output counters are wrong");
++  Check(report.mtp_depths[2].cycles == 1 && report.lookup_depths[3].cycles == 1,
++        "source depth rows are wrong");
++  Check(report.mtp_proposed_per_position[0] == 1 &&
++            report.mtp_accepted_per_position[0] == 1 &&
++            report.mtp_proposed_per_position[1] == 1 &&
++            report.mtp_accepted_per_position[1] == 0,
++        "MTP prefix survival counters are wrong");
++  Check(report.lookup_proposed_per_position[2] == 1 &&
++            report.lookup_accepted_per_position[2] == 1,
++        "lookup prefix survival counters are wrong");
++
++  fnvprof::Reset();
++  const auto reset = fnvprof::BuildReport(1.0);
++  Check(reset.mtp_depths[2].cycles == 0 && reset.lookup_depths[3].cycles == 0,
++        "profiling reset left source depth counters dirty");
++}
++
++int main() {
++  try {
++    TestContextLookup();
++    TestProposalSourceTelemetry();
++    std::cout << "FlashNextVelocity native unit tests passed.\n";
++    return 0;
++  } catch (const std::exception& ex) {
++    std::cerr << "FlashNextVelocity native unit tests FAILED: " << ex.what()
++              << "\n";
++    return 1;
++  }
++}

@@ -1,0 +1,4 @@
+Extract this ZIP directly over the existing FlashNextVelocity Studio project root and replace files.
+Then run RUN.bat. On first run it will copy the old ROCm SDK into .deps\rocm, repair runtime.json, and point hipBLASLt at bin\hipblaslt\library\gfx1151.
+No engine rebuild is required for the migration/runtime-path fix.
+Run BUILD.bat later only when you want to rebuild the native engine; future builds also use project-local ROCm.

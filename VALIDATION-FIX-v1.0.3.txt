@@ -1,0 +1,7 @@
+FlashNextVelocity Studio v1.0.3 validation/runtime acceptance fix
+
+- Replaces the corrupt hand-copied PNG self-test payload with assets/self-test-red.png, a strict 64x64 RGB PNG with valid chunk CRCs.
+- Tests /health, /v1, /v1/models, browser dashboard, text/code generation, real vision inference, benchmark metrics and /metrics before declaring BUILD successful.
+- HTTP test failures now include the actual JSON response body.
+- Repeated BUILD runs reuse an already-prepared Gufo tree when the pinned commit and preparation script are unchanged.
+- Removes the remaining desktop nullable warning.

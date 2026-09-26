@@ -1,0 +1,18 @@
+FlashNextVelocity v1.0.9 incremental root-overlay validation
+
+PASS: Baseline reconstructed as FlashNextVelocity v1.0.8 by applying the completed v1.0.8 root overlay to the user-supplied 2026-09-25 19:29 project context snapshot.
+PASS: Single-session ROCm MTP hidden normalization now calls RmsNormRows with groups=c.hc_count; the previous groups=1 whole-HC-row call is absent from that MTP path.
+PASS: Batched ROCm MTP hidden normalization uses the same groups=c.hc_count geometry.
+PASS: The preserved Halo/Strix Qwen4Exp implementation was checked and uses per-HC-stream MTP hidden RMSNorm; pinned Gufo's scalar reference was checked and contained exactly one old whole-row MTP hnorm call.
+PASS: apply-gufo-overlay.ps1 patches that pinned Gufo scalar reference call to independent per-HC-stream RMSNorm and verifies the legacy whole-row call is gone.
+PASS: BUILD.ps1 rejects a prepared source tree unless single-session, batched, and scalar-reference MTP hnorm paths all use the grouped geometry.
+PASS: Runtime revision is consistent across native engine, Desktop startup gate, and BUILD.ps1: fnv-mtp-hc-groupnorm-v11.
+PASS: Native /v1 and /health version markers are 1.0.9. Health/effective-settings/profile telemetry reports mtp_hidden_normalization=per_hc_stream / MTP hidden normalization: per-HC-stream.
+PASS: v1.0.8 adaptive exact Top-64/128/256 verification selectors and compact support logic remain present.
+PASS: Existing portable C++20 native unit tests compile and pass against the patched tree.
+PASS: VERSION.json parses as valid JSON; changed C++/C#/PowerShell files pass structural delimiter/static source checks.
+PASS: A true incremental root-overlay reapply onto a fresh v1.0.8 tree reproduces every modified/new payload byte-for-byte.
+
+Environment limitation: this sandbox is Linux and does not contain the Windows AMD ROCm gfx1151 toolchain or WinForms build environment. The actual Windows HIP build and target-machine benchmark must be run with BUILD.bat on the GMKtec. BUILD.bat contains source and binary revision gates for this patch.
+
+Performance statement: the patch fixes a concrete proposal-math mismatch upstream of MTP sampling. It is expected to change proposal quality/acceptance, but no specific acceptance percentage or tok/s result is claimed until the target-machine benchmark is rerun.

@@ -1,0 +1,25 @@
+FlashNextVelocity v1.0.9 HOTFIX1 - build guard/root-overlay repair
+
+BASE
+- Apply after the v1.0.9 MTP HC GroupNorm patch has been extracted.
+- It is okay that BUILD.bat failed at the sampled-MTP source guard. No rollback is needed.
+
+FIX
+- Re-supplies the known-good v1.0.8/v1.0.9 sampled-MTP header containing:
+  * kMtpCandidates = 256
+  * SampleMtpFrontierCompact
+  * CompactMtpVerificationWidthForKeep
+- Replaces the brittle Select-String aggregate gate with direct file-content checks.
+- If a marker is truly absent, BUILD.bat now names exactly which implementation marker is missing and the source path.
+- Does not alter MTP math, acceptance rules, sampling, RNG, QSA, PLE, or the v1.0.9 grouped HC normalization.
+
+APPLY
+1. Extract this ZIP directly over the project root.
+2. Replace existing files.
+3. Run BUILD.bat again.
+
+EXPECTED EARLY BUILD OUTPUT
+- MTP hidden handoff verified: independent RMSNorm per hyper-connection stream.
+- Gufo calibrated MTP cost curves restored; unvalidated Windows override removed.
+- Sampled-MTP path verified: 256 candidates + adaptive exact verification width.
+- Adaptive Top-64/128/256 exact verification + retained final frontier + halo-compatible sampled-MTP path verified.

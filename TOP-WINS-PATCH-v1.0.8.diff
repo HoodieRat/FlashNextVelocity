@@ -1,0 +1,782 @@
+--- a/BENCHMARK-TOP-WINS.bat
++++ b/BENCHMARK-TOP-WINS.bat
+@@ -0,0 +1,7 @@
++@echo off
++setlocal
++cd /d "%~dp0"
++powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\benchmark-top-wins.ps1" %*
++set RC=%ERRORLEVEL%
++if not "%RC%"=="0" echo Benchmark failed with exit code %RC%.
++exit /b %RC%
+--- a/OPTIMIZATION-PASS-v1.0.8.md
++++ b/OPTIMIZATION-PASS-v1.0.8.md
+@@ -0,0 +1,87 @@
++# FlashNextVelocity v1.0.8 top-wins optimization pass
++
++Baseline: user-supplied v1.0.6 project ZIP, pinned Gufo `9cad13974cf6da0cd3674b4e0a88b14b7e4a2908`.
++
++This pass intentionally does **not** use the abandoned forced-depth-2 v1.0.7 experiment. It keeps the current adaptive policy, sampler settings, model quantization, context size, and exact target-sampling rules.
++
++## Implemented now
++
++### 1. Deferred exact verification frontier D2H
++
++The v1.0.6 compact sampled-verification path already selected exact raw Top-256 candidates for each target row, but `Executor::ForwardBody` still copied the **entire final vocabulary row to host on every compact verification pass**. The next decode step first attempted `SampleMtpFrontierCompact`; therefore that full transfer was often unused.
++
++v1.0.8 removes that unconditional final-row copy. After a fully accepted compact cycle:
++
++1. the exact Top-256 frontier remains available in pinned host memory;
++2. the authoritative full target row remains resident in `s_.logits` on the GPU;
++3. the next anchor first tries the existing exact compact certificate;
++4. only if the certificate cannot prove the authoritative sample do we call `DownloadVerificationRow` and pay the full-vocabulary D2H + sync;
++5. snapshots and the public `Logits()` accessor also materialize the deferred row before consuming it.
++
++Rejection behavior is unchanged: rejection-frontier rollback still downloads exactly the authoritative row that becomes the next autoregressive frontier. Seeded RNG consumption is unchanged because the compact certificate path already performs the same sampler draw only when exact support is proven, and certificate failure performs no draw before the full-row fallback.
++
++Telemetry now counts compact verification as compact bytes only. A later certificate fallback is counted as a full-row D2H at the point it actually occurs.
++
++### 2. Preserve the current Gufo LLVM-23/gfx1151 W8A8 fix
++
++The supplied v1.0.6 ZIP already contains the Gufo fix from commit `98641a6503da2ec5d6dbb1888ddc95f8a3e13b28`: one `__builtin_amdgcn_sched_barrier(0)` per W8A8 K block when `__clang_major__ >= 23`. Gufo reported that LLVM 23 otherwise hoisted the next K-block operands, caused gfx1151 register spills, and reduced occupancy. Their matched Qwen3.8-Flash-Next UD-Q4_K_XL pp2048 test reported about +5.1% prefill.
++
++v1.0.8 keeps this source in the project-owned overlay and keeps the build gate that refuses to build if the fix disappears.
++
++### 3. Remove the old-project ROCm fallback
++
++`scripts/ensure-local-rocm.ps1` no longer contains a hard-coded `C:\flashfknworkalready\.deps\rocm` source. It can reuse a valid installed Windows ROCm SDK, or `BUILD.bat` downloads the pinned gfx1151 SDK into this project's `.deps\rocm`.
++
++The build now explicitly rejects a ROCm helper that reintroduces the old-project path.
++
++### 4. Repeatable A/B suite
++
++`BENCHMARK-TOP-WINS.bat` / `scripts\benchmark-top-wins.ps1` adds fixed-prompt, fixed-seed profiled runs for:
++
++- normal chat;
++- coding;
++- structured JSON;
++- continuation prose;
++- predictable/repetitive text;
++- optional long-context ladder.
++
++Every run stores prompt hashes, output hashes, effective sampling/thinking settings, runtime revision, per-repetition metrics, verification D2H rows/bytes, certificate success/fallback counts, and raw profile text. Comparison refuses mismatched settings or prompt hashes.
++
++## Source-level strongest evidence
++
++| Finding | Evidence | Decision |
++|---|---|---|
++| Full verification frontier was downloaded every compact cycle | v1.0.6 `executor.cpp`: after Top-256 transfer loop, a second `hipMemcpyAsync` copied `(n_logits - 1) * vocab` full row unconditionally | **Fixed in v1.0.8** |
++| Exact compact fallback already existed | `FinishDecode`: certificate failure calls `DownloadVerificationRow(row)` before full verification | Reused, not redesigned |
++| Rejection frontier already downloads the exact required row | `Rollback(..., logits)` copies `keep - 1` row while restoring state | Preserved |
++| Old high-acceptance proposal semantics were deterministic draft top-token | v1.0.6 `halo_greedy` implementation and preserved halo-box source audit | Preserved as default; no new sampler change |
++| LLVM-23 W8A8 spill issue has a proven gfx1151 fix | Gufo commit `98641a65...` | Already present; preserved and build-gated |
++
++## Cross-project best-of audit
++
++| Technique | Project/source | What it solves | FlashNextVelocity status | Action |
++|---|---|---|---|---|
++| gfx1151 W8A8 K-block scheduler fence | Gufo / pwilkin | LLVM-23 register spilling, low occupancy | Equivalent already present | Keep + gate |
++| Deterministic MTP top-token proposal | halo-box/strix-llama.cpp lineage | Higher MTP proposal agreement on this model family | v1.0.6 `halo_greedy` | Keep; measure acceptance |
++| Recurrent-state speculative rollback/checkpoints | halo-box / llama-halo-hybrid | Correct partial MTP acceptance | Gufo has explicit rollback snapshots/state restore | Do not transplant another checkpoint architecture |
++| Pooled QSA block-key cache | llama-cpp-rdna-boosts | Avoid rebuilding long-context indexer representation each token | Gufo already maintains `block_k` pooled indexer cache | Measure at depth; no duplicate port |
++| Sparse selected-block FA/QSA | rdna-boosts / llama-halo-hybrid | Avoid attending full cache at long context | Gufo already has sparse selection + selected-block attention kernels | Benchmark 32K/64K/131K before changing |
++| Managed lazy/on-direct PLE reader | rdna-boosts | Avoid resident giant PLE table / page pressure | Windows runtime already uses lazy mapped model access plus separate PLE I/O path | No Linux direct-I/O transplant |
++| Grouped decode matvec / small-K kernels | halo-box / llama-halo-hybrid | Launch + bandwidth reduction for narrow projections | Gufo already has specialized Qwen3.8 kernels; implementation differs | A/B individual shapes before porting |
++| GPU-side compact target verification | Gufo + project overlay | Avoid full-vocab host sampling for every draft row | Implemented; v1.0.8 removes remaining unconditional final full row | **Top decode win in this patch** |
++| DFlash2 selector/lattice | pwilkin/strix-halo | Alternate drafter economics | Different model/drafter semantics | Do not replace native MTP head |
++| WSL/DXG memory placement | strix-alloy-wsl2 | Large-model residency under WSL | Violates native-Windows requirement | Not applicable |
++
++## Expected benchmark effect
++
++No token/s result is claimed without running on the target gfx1151 machine. The deferred-frontier change should reduce verification D2H bytes and host synchronization work whenever compact certificates succeed. The effect on sustained decode depends on how much of the previous cycle time was attributable to that transfer versus GPU trunk/projection work.
++
++The W8A8 barrier primarily improves prefill on LLVM 23+; it was already in the supplied v1.0.6 baseline, so it should not be credited as a new v1.0.8 A/B gain.
++
++## Remaining high-value work
++
++1. Run the new suite and inspect `full_rows_d2h`, `d2h_bytes`, `certificate_successes`, verification projection time, and sustained 64-token windows.
++2. Continue the old halo-box vs current Gufo hidden/recurrent MTP-state audit if `halo_greedy` still does not recover historical acceptance.
++3. Profile verification width 1/2/3/4 on gfx1151 and attack the largest GPU substage, not the sync wrapper.
++4. Run QSA depth ladder at real occupied context before touching shallow-context QSA code.
++5. A/B grouped/small-K projection kernels only where Gufo's current implementation loses on measured gfx1151 shapes.
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# FlashNextVelocity Studio 1.0.6
++# FlashNextVelocity Studio 1.0.8
+ 
+ A Windows desktop/tray application and native `gfx1151` inference server for Qwen3.8-Flash-Next on AMD Strix Halo.
+ 
+@@ -30,9 +30,9 @@
+ 
+ The build is project-local. It installs/builds the required native dependencies, pins the HIP host toolset to MSVC 14.44, uses the pinned Gufo commit, builds the native engine, builds the Windows tray app, creates `dist\`, then starts the real engine for runtime self-tests.
+ 
+-On the first v1.0.4 run/build, Studio can copy an existing ROCm gfx1151 SDK from the old project into its own `.deps\rocm`. After that, Studio no longer depends on `C:\flashfknworkalready` and that old folder may be deleted.
++Studio owns its ROCm gfx1151 SDK under `.deps\rocm`. BUILD can seed it from a valid installed Windows ROCm SDK or download the pinned project-local package directly; the live build/runtime path has no dependency on another project checkout.
+ 
+-If `C:\flashfknworkalready\config.json` exists, it is migrated into the new app for the first build. Otherwise the desktop app searches `C:\FlashNextModels` for the model, shared Q8_0 MTP and mmproj on first launch.
++When saved model paths are empty, the desktop app searches `C:\FlashNextModels` and the project `models` folder for the target model, shared Q8_0 MTP, and mmproj on first launch.
+ 
+ A build is considered successful only after the full runtime acceptance gate passes when a model is configured. The gate verifies the dashboard/API, real text generation, real vision inference with a CRC-valid PNG fixture, and benchmark metrics. Compilation alone is not treated as success.
+ 
+@@ -144,7 +144,17 @@
+ 
+ ## v1.0.4 ROCm ownership / hipBLASLt fix
+ 
+-Studio now owns `.deps\rocm` inside the project. `RUN.bat` performs a one-time migration from an older ROCm install when needed. The hipBLASLt environment is pointed at the architecture-specific `bin\hipblaslt\library\gfx1151` directory, where `TensileLibrary_lazy_gfx1151.*` and gfx1151 code objects live.
++Studio owns `.deps\rocm` inside the project. `BUILD.bat` can seed it from a valid installed Windows gfx1151 ROCm SDK or download the pinned package directly. The hipBLASLt environment is pointed at the architecture-specific `bin\hipblaslt\library\gfx1151` directory, where `TensileLibrary_lazy_gfx1151.*` and gfx1151 code objects live.
++
++## v1.0.8: top-wins verification patch
++
++Compact sampled MTP verification now keeps the authoritative final full-vocabulary target row on the GPU. The next anchor is sampled from the exact Top-256 certificate when that certificate is sufficient; a full-vocabulary D2H transfer happens only on certificate fallback, rejection-frontier handling, snapshots, or an explicit `Logits()` read. This removes the previous unconditional full-row transfer from every successful compact verification cycle without changing target sampling, penalties, seeded RNG consumption, or rollback semantics.
++
++The build keeps the LLVM 23 `gfx1151` W8A8 scheduler-barrier fix already present in the v1.0.6 baseline, rejects a source tree that regresses to unconditional verification-frontier D2H, and removes the hard-coded fallback to `C:\flashfknworkalready` from the ROCm helper.
++
++`BENCHMARK-TOP-WINS.bat` runs a repeatable profiled suite using the Studio's effective sampler/thinking settings, fixed prompt hashes and seeds, and optional long-context ladder. Use the same saved settings for baseline/patched runs; the script refuses A/B comparison when settings or prompt hashes differ.
++
++See `OPTIMIZATION-PASS-v1.0.8.md` for the source evidence and cross-project audit.
+ 
+ ## v1.0.6: sampled-MTP recovery mode
+ 
+--- a/RUN.bat
++++ b/RUN.bat
+@@ -9,7 +9,7 @@
+ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ensure-local-rocm.ps1"
+ if errorlevel 1 (
+   echo.
+-  echo ROCm migration/runtime-path repair failed.
++  echo ROCm local-runtime repair failed.
+   pause
+   exit /b 1
+ )
+--- a/VERSION.json
++++ b/VERSION.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "FlashNextVelocity Studio",
+-  "version": "1.0.6",
++  "version": "1.0.8",
+   "gufo_commit": "9cad13974cf6da0cd3674b4e0a88b14b7e4a2908",
+   "target": "Windows 11 x64 / AMD gfx1151",
+-  "notes": "Halo-compatible deterministic sampled-MTP proposal mode, exact target-sample verification, real Gufo prefill batch control, plus existing context lookup/telemetry/memory guard."
++  "notes": "Top-wins patch: deferred exact compact-verification frontier D2H, preserved LLVM-23 gfx1151 W8A8 spill fix, stale ROCm-project dependency removed, and repeatable A/B benchmark harness."
+ }
+--- a/gufo-overlay/src/models/qwen38_flash_next/engine.cpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/engine.cpp
+@@ -286,6 +286,7 @@
+   tokens_.clear();
+   hidden_base_ = 0;
+   frontier_candidates_valid_ = false;
++  deferred_frontier_valid_ = false;
+   draft_length_.Reset();
+   model_->executor_->MtpRewind(*session_, 0);
+   valid_ = true;
+@@ -315,6 +316,20 @@
+              : 0;
+ }
+ 
++bool Session::MaterializeDeferredFrontier(std::string* error_msg) const {
++  if (!deferred_frontier_valid_) return true;
++  auto& exec = *model_->executor_;
++  if (!exec.DownloadVerificationRow(deferred_frontier_row_, error_msg)) return false;
++  const auto row = exec.VerificationLogitRow(deferred_frontier_row_);
++  if (row.size() != model_->VocabSize()) {
++    AssignError(error_msg, "deferred verification frontier is unavailable");
++    return false;
++  }
++  std::copy(row.begin(), row.end(), logits_.begin());
++  deferred_frontier_valid_ = false;
++  return true;
++}
++
+ std::uint64_t Session::SnapshotBytes() const {
+   if (!valid_)
+     return 0;
+@@ -330,6 +345,7 @@
+     AssignError(error_msg, "snapshot needs a synced, non-empty context");
+     return nullptr;
+   }
++  if (!MaterializeDeferredFrontier(error_msg)) return nullptr;
+   const auto token_count = static_cast<std::uint32_t>(tokens_.size());
+   const std::uint32_t hidden_rows = KeptHiddenRows();
+   const std::uint64_t executor_bytes =
+@@ -449,6 +465,7 @@
+   hidden_base_ = info.position - info.hidden_rows;
+   draft_token_ = 0;
+   frontier_candidates_valid_ = false;
++  deferred_frontier_valid_ = false;
+   draft_length_ = restored_policy;
+   stats_ = {};
+   valid_ = true;
+@@ -535,7 +552,10 @@
+ 
+ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
+                    bool prefill) {
+-  if (!tokens.empty()) frontier_candidates_valid_ = false;
++  if (!tokens.empty()) {
++    frontier_candidates_valid_ = false;
++    deferred_frontier_valid_ = false;
++  }
+   rocm::Executor& exec = *model_->executor_;
+   for (std::size_t off = 0; off < tokens.size(); off += exec.max_batch()) {
+     const std::size_t n =
+@@ -723,11 +743,17 @@
+         ++stats_.compact_frontier_samples;
+       } else {
+         ++stats_.compact_frontier_fallbacks;
++        // The exact certificate failed. Only now pay for the authoritative
++        // full-vocabulary D2H row retained on the GPU from the prior cycle.
++        if (!MaterializeDeferredFrontier(error_msg)) return false;
+       }
+     }
+     frontier_candidates_valid_ = false;
+     if (!sampled_compact_frontier)
+       anchor = static_cast<std::int32_t>(sampler.Sample(logits_));
++    // The chosen anchor makes the previous target frontier obsolete. A pending
++    // sampler correction needs no logits; compact success needs no full row.
++    deferred_frontier_valid_ = false;
+   }
+   if (is_stop(anchor)) {
+     result->stop = true;
+@@ -930,6 +956,7 @@
+   // this cycle's anchor. A new one is published only after a successful
+   // all-accepted compact verification below.
+   frontier_candidates_valid_ = false;
++  deferred_frontier_valid_ = false;
+   const auto vocab = model_->VocabSize();
+   const auto is_stop = [&](std::int32_t token) {
+     return request.stop_at_eos && model_->IsStopToken(token);
+@@ -1074,7 +1101,7 @@
+       return false;
+     }
+   }
+-  if (!gpu_verification && !(compact_verification && keep < k)) {
++  if (!gpu_verification && !compact_verification) {
+     const auto frontier =
+         host_pinned_verification
+             ? exec.VerificationLogitRow(keep - 1)
+@@ -1091,6 +1118,8 @@
+     if (compact_rows.size() == k) {
+       frontier_candidates_ = compact_rows[k - 1];
+       frontier_candidates_valid_ = true;
++      deferred_frontier_row_ = k - 1;
++      deferred_frontier_valid_ = true;
+     }
+   }
+   hidden_base_ = base;
+--- a/gufo-overlay/src/models/qwen38_flash_next/engine.hpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/engine.hpp
+@@ -188,8 +188,9 @@
+   [[nodiscard]] static bool EvaluateBatch(
+       std::span<const AdvanceRequest> requests,
+       std::string* error_msg = nullptr);
+-  [[nodiscard]] std::span<const float> Logits() const noexcept {
+-    return valid_ ? std::span<const float>(logits_) : std::span<const float>{};
++  [[nodiscard]] std::span<const float> Logits() const {
++    if (!valid_ || !MaterializeDeferredFrontier(nullptr)) return {};
++    return std::span<const float>(logits_);
+   }
+   [[nodiscard]] std::uint32_t Position() const noexcept;
+   [[nodiscard]] std::uint32_t ContextSize() const noexcept;
+@@ -281,11 +282,14 @@
+   bool DropLowConfidenceDraft(PendingDecode& pending);
+   bool FinishDecode(const DecodeRequest& request, const PendingDecode& pending,
+                     std::string* error_msg);
++  // Compact verification leaves the authoritative final target row on the GPU.
++  // Materialize it only when a full-vocabulary consumer actually needs it.
++  bool MaterializeDeferredFrontier(std::string* error_msg) const;
+ 
+   std::shared_ptr<Model> model_;
+   std::unique_ptr<rocm::Session> session_;
+   std::vector<std::int32_t> tokens_;
+-  std::vector<float> logits_;
++  mutable std::vector<float> logits_;
+   std::int32_t draft_token_{0};
+   std::vector<float> verify_logits_;
+   std::uint32_t hidden_base_{0};  ///< first position whose hidden row is kept
+@@ -293,11 +297,12 @@
+   float draft_confidence_{0.0F};
+   SpeculativeStats stats_;
+   // Performance-only cache of the raw Top-256 from the current target
+-  // frontier. Full logits remain authoritative and are still retained for
+-  // snapshots/fallbacks; this merely avoids rescanning the whole vocabulary
+-  // on the CPU when exact compact support can be certified.
++  // frontier. When compact support certifies the next draw, the full row never
++  // leaves the GPU. A fallback/snapshot/Logits() call materializes it lazily.
+   MtpVerificationCandidateLogits frontier_candidates_{};
+   bool frontier_candidates_valid_{false};
++  mutable std::uint32_t deferred_frontier_row_{0};
++  mutable bool deferred_frontier_valid_{false};
+   std::vector<std::uint8_t> image_identity_;
+   bool valid_{true};
+   [[nodiscard]] bool MtpEnabled() const noexcept;
+--- a/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
+@@ -2187,9 +2187,8 @@
+           offsetof(MtpVerificationCandidateLogits, logits) +
+           count * sizeof(float);
+       fnvprof::AddVerificationTransfer(
+-          1, n_logits,
+-          static_cast<std::uint64_t>(c.vocab_size) * sizeof(float) +
+-              static_cast<std::uint64_t>(n_logits) * compact_bytes,
++          0, n_logits,
++          static_cast<std::uint64_t>(n_logits) * compact_bytes,
+           static_cast<std::uint64_t>(n_logits) * count);
+     } else if (download_logits) {
+       fnvprof::AddVerificationTransfer(
+@@ -2430,20 +2429,10 @@
+           return false;
+         }
+       }
+-      {
+-        VerifyGpuSpan d2h_span(stream_, fnvprof::VerifySubstage::D2H,
+-                               fnvprof::OnDecode());
+-        if (!Check(hipMemcpyAsync(
+-                       logits_host_ +
+-                           static_cast<std::size_t>(n_logits - 1) * c.vocab_size,
+-                       s_.logits + static_cast<std::size_t>(n_logits - 1) *
+-                                       c.vocab_size,
+-                       static_cast<std::size_t>(c.vocab_size) * sizeof(float),
+-                       hipMemcpyDeviceToHost, stream_),
+-                   "verification frontier download", error_msg)) {
+-          return false;
+-        }
+-      }
++      // Do not download the final full-vocabulary row here. Its Top-256
++      // certificate is enough for the common next-anchor path. The full row
++      // remains in s_.logits and is materialized lazily only on certificate
++      // failure, rejection-frontier handling, snapshots, or Logits().
+     } else if (download_logits) {
+       VerifyGpuSpan d2h_span(stream_, fnvprof::VerifySubstage::D2H,
+                              speculative && fnvprof::OnDecode());
+--- a/scripts/benchmark-top-wins.ps1
++++ b/scripts/benchmark-top-wins.ps1
+@@ -0,0 +1,241 @@
++param(
++  [string]$BaseUrl = 'http://127.0.0.1:8080',
++  [string]$Label = 'run',
++  [ValidateRange(1,20)][int]$Repetitions = 3,
++  [ValidateRange(32,4096)][int]$MaxTokens = 256,
++  [int]$SeedBase = 424242,
++  [switch]$IncludeContextLadder,
++  [string]$OutputDir = '',
++  [string]$CompareTo = ''
++)
++
++$ErrorActionPreference='Stop'
++$ProgressPreference='SilentlyContinue'
++$Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
++if([string]::IsNullOrWhiteSpace($OutputDir)){$OutputDir=Join-Path $Root 'benchmarks\top-wins'}
++New-Item -ItemType Directory -Force $OutputDir | Out-Null
++$BaseUrl=$BaseUrl.TrimEnd('/')
++
++function Sha256Text([string]$Text){
++  $bytes=[Text.Encoding]::UTF8.GetBytes($Text)
++  $sha=[Security.Cryptography.SHA256]::Create()
++  try {$hash=$sha.ComputeHash($bytes)} finally {$sha.Dispose()}
++  return ([BitConverter]::ToString($hash)).Replace('-','').ToLowerInvariant()
++}
++function Median([double[]]$Values){
++  if($null -eq $Values -or $Values.Count -eq 0){return 0.0}
++  $x=@($Values|Sort-Object);$m=[int]($x.Count/2)
++  if(($x.Count % 2)-eq 1){return [double]$x[$m]}
++  return ([double]$x[$m-1]+[double]$x[$m])/2.0
++}
++function Invoke-JsonPost([string]$Uri,$Body,[int]$TimeoutSec=1200){
++  $json=$Body|ConvertTo-Json -Depth 20 -Compress
++  return Invoke-RestMethod -Method Post -Uri $Uri -ContentType 'application/json' -Body $json -TimeoutSec $TimeoutSec
++}
++function EffectiveRequestSettings($Health){
++  $s=$Health.sampling
++  $effort=if([bool]$Health.thinking){[string]$Health.reasoning_effort}else{'off'}
++  return [ordered]@{
++    temperature=[double]$s.temperature
++    top_p=[double]$s.top_p
++    top_k=[int]$s.top_k
++    min_p=[double]$s.min_p
++    repeat_penalty=[double]$s.repeat_penalty
++    repeat_last_n=[int]$s.repeat_last_n
++    chat_template_kwargs=[ordered]@{
++      enable_thinking=[bool]$Health.thinking
++      preserve_thinking=([bool]$Health.thinking -and [bool]$Health.preserve_thinking)
++      reasoning_effort=$effort
++    }
++  }
++}
++function EffectiveRuntimeFingerprint($Health){
++  $s=$Health.sampling
++  $thinking=[bool]$Health.thinking
++  $effectiveEffort=if($thinking){[string]$Health.reasoning_effort}else{'OFF'}
++  return [ordered]@{
++    model=[string]$Health.model
++    mtp=[bool]$Health.mtp
++    context=[int64]$Health.context
++    draft_max=[int]$Health.draft_max
++    draft_confidence=[double]$Health.draft_confidence
++    mtp_proposal_mode=[string]$Health.mtp_proposal_mode
++    prefill_batch=[int]$Health.prefill_batch
++    context_lookup=[bool]$Health.context_lookup
++    context_lookup_active=[bool]$Health.context_lookup_active
++    context_lookup_min_ngram=[int]$Health.context_lookup_min_ngram
++    context_lookup_max_ngram=[int]$Health.context_lookup_max_ngram
++    context_lookup_window=[int]$Health.context_lookup_window
++    context_lookup_min_draft=[int]$Health.context_lookup_min_draft
++    sessions=[int]$Health.sessions
++    thinking=$thinking
++    preserve_thinking=($thinking -and [bool]$Health.preserve_thinking)
++    reasoning_effort=$effectiveEffort
++    sampling=[ordered]@{
++      temperature=[double]$s.temperature
++      top_p=[double]$s.top_p
++      top_k=[int]$s.top_k
++      min_p=[double]$s.min_p
++      repeat_penalty=[double]$s.repeat_penalty
++      repeat_last_n=[int]$s.repeat_last_n
++    }
++  }
++}
++function RequestBody([string]$Prompt,[int]$Max,[int]$Seed,$Settings,[bool]$Profile=$true){
++  $body=[ordered]@{
++    model='local'
++    messages=@([ordered]@{role='user';content=$Prompt})
++    max_tokens=$Max
++    stream=$false
++    seed=$Seed
++    flashnext_profile=$Profile
++    temperature=$Settings.temperature
++    top_p=$Settings.top_p
++    top_k=$Settings.top_k
++    min_p=$Settings.min_p
++    repeat_penalty=$Settings.repeat_penalty
++    repeat_last_n=$Settings.repeat_last_n
++    chat_template_kwargs=$Settings.chat_template_kwargs
++  }
++  return $body
++}
++function RunCase([string]$Name,[string]$Prompt,[int]$CaseMax,$Settings,$Health,[int]$Reps){
++  $promptHash=Sha256Text $Prompt
++  Write-Host "[$Name] warmup" -ForegroundColor DarkCyan
++  $null=Invoke-JsonPost "$BaseUrl/v1/chat/completions" (RequestBody $Prompt ([Math]::Min(32,$CaseMax)) 17 $Settings $false)
++  $runs=@()
++  for($i=0;$i -lt $Reps;$i++){
++    $seed=$SeedBase+$i
++    Write-Host "[$Name] repetition $($i+1)/$Reps seed=$seed" -ForegroundColor Cyan
++    $r=Invoke-JsonPost "$BaseUrl/v1/chat/completions" (RequestBody $Prompt $CaseMax $seed $Settings $true)
++    $m=$r.usage.flashnext_velocity
++    if($null -eq $m){throw "[$Name] response did not contain usage.flashnext_velocity"}
++    $text=[string]$r.choices[0].message.content
++    $acceptance=if($null -ne $m.mtp_acceptance){[double]$m.mtp_acceptance}else{[double]$m.draft_acceptance}
++    $verification=if($null -ne $m.mtp -and $null -ne $m.mtp.verification){$m.mtp.verification}else{$null}
++    $fullRows=if($null -ne $verification){[int64]$verification.full_rows_d2h}else{0}
++    $compactRows=if($null -ne $verification){[int64]$verification.compact_rows_d2h}else{0}
++    $d2hBytes=if($null -ne $verification){[int64]$verification.d2h_bytes}else{0}
++    $certOk=if($null -ne $verification){[int64]$verification.certificate_successes}else{0}
++    $certFallback=if($null -ne $verification){[int64]$verification.certificate_fallbacks}else{0}
++    $runs += [ordered]@{
++      repetition=$i+1
++      seed=$seed
++      output_sha256=Sha256Text $text
++      output=$text
++      prompt_tokens=[int64]$m.prompt_tokens
++      completion_tokens=[int64]$m.completion_tokens
++      prefill_tps=[double]$m.prefill_tokens_per_second
++      decode_tps=[double]$m.completion_tokens_per_second
++      ttft_ms=[double]$m.ttft_ms
++      mtp_acceptance=$acceptance
++      avg_draft_depth=[double]$m.avg_draft_depth
++      verification=$verification
++      full_rows_d2h=$fullRows
++      compact_rows_d2h=$compactRows
++      d2h_bytes=$d2hBytes
++      certificate_successes=$certOk
++      certificate_fallbacks=$certFallback
++      profile_text=[string]$m.profile_text
++      metrics=$m
++    }
++  }
++  return [ordered]@{
++    name=$Name
++    prompt_sha256=$promptHash
++    max_tokens=$CaseMax
++    prompt=$Prompt
++    runs=$runs
++    median_decode_tps=Median @($runs|ForEach-Object{[double]$_.decode_tps})
++    median_prefill_tps=Median @($runs|ForEach-Object{[double]$_.prefill_tps})
++    median_acceptance=Median @($runs|ForEach-Object{[double]$_.mtp_acceptance})
++  }
++}
++
++$health=Invoke-RestMethod "$BaseUrl/health" -TimeoutSec 15
++if(-not $health.mtp){Write-Warning 'MTP is not active. The suite will still run, but it will not measure the intended MTP path.'}
++$settings=EffectiveRequestSettings $health
++$runtimeSettings=EffectiveRuntimeFingerprint $health
++$settingsJson=$runtimeSettings|ConvertTo-Json -Depth 10 -Compress
++$settingsHash=Sha256Text $settingsJson
++
++$cases=@(
++  [ordered]@{name='normal-chat';max=$MaxTokens;prompt='Explain why a program can begin inference near 48 tokens per second and then settle near 30 tokens per second. Focus on GPU work, speculative verification, memory bandwidth, and synchronization. Be technically precise and non-repetitive.'},
++  [ordered]@{name='coding';max=$MaxTokens;prompt='Write a production-quality C# method that atomically saves a JSON configuration file on Windows, validates a round trip, replaces the live file, and preserves the original on failure. Explain the important failure cases after the code.'},
++  [ordered]@{name='structured-json';max=[Math]::Min($MaxTokens,220);prompt='Return valid JSON only. Build an object with keys summary, bottlenecks, experiments, and acceptance_criteria. experiments must contain five objects with id, hypothesis, metric, and pass_condition for optimizing a speculative-decoding inference runtime.'},
++  [ordered]@{name='continuation-prose';max=$MaxTokens;prompt='Continue this technical paragraph in a coherent, non-repetitive style for several paragraphs: A fast inference runtime is not defined by one peak token-rate sample. Sustained throughput depends on the interaction between kernel occupancy, memory traffic, speculative acceptance, and the cost of verifying each proposed token.'},
++  [ordered]@{name='predictable-text';max=[Math]::Min($MaxTokens,192);prompt='Continue the sequence exactly, one item per line, through item 120: item 1 = alpha beta gamma; item 2 = alpha beta gamma; item 3 = alpha beta gamma; item 4 = alpha beta gamma;'}
++)
++
++$results=@()
++foreach($c in $cases){$results += RunCase $c.name $c.prompt $c.max $settings $health $Repetitions}
++
++if($IncludeContextLadder){
++  # The repeated token-like unit is deliberately simple. The report records the
++  # actual prompt-token count returned by the runtime; no claimed depth is based
++  # on the character count.
++  $targets=@(4096,32768,65536,126000)
++  foreach($target in $targets){
++    $unit=' x'
++    $filler=($unit * $target) -join ''
++    $prompt="Context ladder target approximately $target tokens. Read the filler, then answer with exactly three concise sentences describing why long-context QSA/indexer cost matters. FILLER:$filler"
++    try{$results += RunCase "context-$target" $prompt ([Math]::Min(96,$MaxTokens)) $settings $health 1}
++    catch{Write-Warning "context-$target skipped/failed: $($_.Exception.Message)"}
++  }
++}
++
++$record=[ordered]@{
++  schema=1
++  label=$Label
++  timestamp_utc=[DateTime]::UtcNow.ToString('o')
++  base_url=$BaseUrl
++  runtime_revision=[string]$health.runtime_revision
++  version=[string]$health.version
++  model=[string]$health.model
++  context=[int64]$health.context
++  request_settings=$settings
++  effective_settings=$runtimeSettings
++  settings_sha256=$settingsHash
++  repetitions=$Repetitions
++  seed_base=$SeedBase
++  cases=$results
++}
++$stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
++$out=Join-Path $OutputDir ("{0}-{1}.json" -f ($Label -replace '[^A-Za-z0-9_.-]','_'),$stamp)
++[IO.File]::WriteAllText($out,($record|ConvertTo-Json -Depth 100),[Text.UTF8Encoding]::new($false))
++
++$csvRows=foreach($c in $results){
++  [pscustomobject]@{label=$Label;case=$c.name;prompt_sha256=$c.prompt_sha256;median_decode_tps=$c.median_decode_tps;median_prefill_tps=$c.median_prefill_tps;median_acceptance=$c.median_acceptance;settings_sha256=$settingsHash;runtime_revision=$health.runtime_revision}
++}
++$csv=Join-Path $OutputDir ("{0}-{1}.csv" -f ($Label -replace '[^A-Za-z0-9_.-]','_'),$stamp)
++$csvRows|Export-Csv -NoTypeInformation -Encoding UTF8 $csv
++
++Write-Host "Saved: $out" -ForegroundColor Green
++Write-Host "Saved: $csv" -ForegroundColor Green
++Write-Host ''
++$csvRows|Format-Table -AutoSize
++
++if(-not [string]::IsNullOrWhiteSpace($CompareTo)){
++  $baseline=Get-Content $CompareTo -Raw|ConvertFrom-Json
++  if([string]$baseline.settings_sha256 -ne $settingsHash){throw 'Comparison refused: effective settings fingerprints differ.'}
++  $baseBy=@{};foreach($c in $baseline.cases){$baseBy[[string]$c.name]=$c}
++  $comparison=@()
++  foreach($c in $results){
++    if(-not $baseBy.ContainsKey($c.name)){continue}
++    $b=$baseBy[$c.name]
++    if([string]$b.prompt_sha256 -ne [string]$c.prompt_sha256){throw "Comparison refused for $($c.name): prompt hashes differ."}
++    $bt=[double]$b.median_decode_tps;$pt=[double]$c.median_decode_tps
++    $deltaPct=if($bt -gt 0){100.0*($pt-$bt)/$bt}else{0.0}
++    $comparison += [pscustomobject]@{
++      case=$c.name
++      baseline_tps=$bt
++      current_tps=$pt
++      delta_tps=$pt-$bt
++      delta_percent=$deltaPct
++      baseline_acceptance=[double]$b.median_acceptance
++      current_acceptance=[double]$c.median_acceptance
++    }
++  }
++  Write-Host 'A/B comparison:' -ForegroundColor Yellow
++  $comparison|Format-Table -AutoSize
++}
+--- a/scripts/build.ps1
++++ b/scripts/build.ps1
+@@ -124,6 +124,17 @@
+   throw 'Gufo overlay is missing the halo-compatible sampled-MTP proposal path or recurrent-state invariant.'
+ }
+ Write-Host 'Top-256 support + exact compact verification + halo-compatible deterministic sampled-MTP path verified.' -ForegroundColor Green
++if((Select-String -Path $executorSource -SimpleMatch 'verification frontier download' -Quiet) -or
++   -not (Select-String -Path $engineSource -SimpleMatch 'MaterializeDeferredFrontier' -Quiet) -or
++   -not (Select-String -Path $engineSource -SimpleMatch 'deferred_frontier_valid_ = true' -Quiet)){
++  throw 'Gufo overlay is missing deferred exact verification-frontier D2H.'
++}
++Write-Host 'Deferred exact verification frontier verified: no unconditional full-vocab D2H.' -ForegroundColor Green
++$rocmHelper=Join-Path $PSScriptRoot 'ensure-local-rocm.ps1'
++if((Get-Content $rocmHelper -Raw) -match '(?i)flashfknworkalready'){
++  throw 'ROCm helper still contains a hard-coded dependency on an older project tree.'
++}
++Write-Host 'ROCm helper has no hard-coded old-project dependency.' -ForegroundColor Green
+ $kernelsSource=Join-Path $Gufo 'src\models\qwen38_flash_next\kernels\rocm\kernels.hip.cpp'
+ if(-not(Test-Path $kernelsSource) -or
+    -not (Select-String -Path $kernelsSource -SimpleMatch 'LLVM 23 hoists the next K block' -Quiet)){
+@@ -148,7 +159,7 @@
+ $ensureRocm=Join-Path $PSScriptRoot 'ensure-local-rocm.ps1'
+ if(-not(ValidRocm $ProjectRocm)){
+   & $ensureRocm -Root $Root -AllowMissing
+-  if($LASTEXITCODE -ne 0){throw 'ROCm migration helper failed.'}
++  if($LASTEXITCODE -ne 0){throw 'ROCm local-SDK helper failed.'}
+ }
+ if(-not(ValidRocm $ProjectRocm)){
+   $Rocm=$ProjectRocm;New-Item -ItemType Directory -Force $Rocm|Out-Null
+@@ -217,10 +228,10 @@
+ if($engineAscii.Contains($legacyCompactFatal)){
+   throw 'Native engine validation failed: built EXE still contains the legacy compact-verification fatal. Stale object reuse detected.'
+ }
+-if(-not $engineAscii.Contains('fnv-halo-greedy-mtp-recovery-v9')){
++if(-not $engineAscii.Contains('fnv-top-wins-deferred-frontier-v10')){
+   throw 'Native engine validation failed: current runtime revision marker is missing from the built EXE.'
+ }
+-Write-Host 'Native engine source revision verified: fnv-halo-greedy-mtp-recovery-v9; legacy compact fatal absent.' -ForegroundColor Green
++Write-Host 'Native engine source revision verified: fnv-top-wins-deferred-frontier-v10; legacy compact fatal absent.' -ForegroundColor Green
+ $engineAscii=$null
+ 
+ # Desktop app.
+--- a/scripts/ensure-local-rocm.ps1
++++ b/scripts/ensure-local-rocm.ps1
+@@ -10,7 +10,6 @@
+ $ProjectRocm=Join-Path $Root '.deps\rocm'
+ $Dist=Join-Path $Root 'dist'
+ $RuntimeFile=Join-Path $Dist 'runtime.json'
+-$Legacy='C:\flashfknworkalready\.deps\rocm'
+ 
+ function Find-Clang([string]$p){
+   if(-not $p -or -not(Test-Path $p)){return $null}
+@@ -49,20 +48,20 @@
+   }
+   $marker=Join-Path $Root '.rocm-path.txt'
+   if(Test-Path $marker){$sources += (Get-Content $marker -Raw).Trim()}
+-  $sources += @($env:ROCM_PATH,$env:HIP_PATH,$Legacy,'C:\Program Files\AMD\ROCm\10.0','C:\Program Files\AMD\ROCm\10.1')
++  $sources += @($env:ROCM_PATH,$env:HIP_PATH,'C:\Program Files\AMD\ROCm\10.0','C:\Program Files\AMD\ROCm\10.1')
+   $source=$sources | Where-Object {$_ -and ($_ -ne $ProjectRocm) -and (Test-Rocm $_)} | Select-Object -First 1
+   if(-not $source){
+     if($AllowMissing){Write-Host 'No reusable ROCm installation found; BUILD will install the project-local SDK.' -ForegroundColor Yellow;exit 0}
+-    throw "No reusable ROCm gfx1151 SDK was found. Expected the old SDK at $Legacy or a valid project-local .deps\\rocm."
++    throw "No reusable Windows ROCm gfx1151 SDK was found. Run BUILD.bat so the pinned project-local .deps\\rocm SDK can be installed."
+   }
+   $source=(Resolve-Path $source).Path
+-  Write-Host "Migrating ROCm into Studio (one time):" -ForegroundColor Cyan
++  Write-Host "Seeding project-local ROCm from an existing Windows SDK:" -ForegroundColor Cyan
+   Write-Host "  FROM: $source"
+   Write-Host "  TO:   $ProjectRocm"
+   New-Item -ItemType Directory -Force $ProjectRocm | Out-Null
+   & robocopy.exe $source $ProjectRocm /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /MT:16 /NP
+   $rc=$LASTEXITCODE
+-  if($rc -ge 8){throw "ROCm migration failed; robocopy exit code $rc"}
++  if($rc -ge 8){throw "ROCm SDK copy failed; robocopy exit code $rc"}
+ }
+ 
+ if(-not(Test-Rocm $ProjectRocm)){throw "Project-local ROCm validation failed: $ProjectRocm"}
+--- a/src/desktop/EngineManager.cs
++++ b/src/desktop/EngineManager.cs
+@@ -6,7 +6,7 @@
+ 
+ internal sealed class EngineManager : IDisposable
+ {
+-    private const string RequiredRuntimeRevision = "fnv-halo-greedy-mtp-recovery-v9";
++    private const string RequiredRuntimeRevision = "fnv-top-wins-deferred-frontier-v10";
+     private Process? _process;
+     private StreamWriter? _logWriter;
+     private EngineConfig? _appliedConfig;
+--- a/src/desktop/FlashNextVelocity.Desktop.csproj
++++ b/src/desktop/FlashNextVelocity.Desktop.csproj
+@@ -7,7 +7,7 @@
+     <ImplicitUsings>enable</ImplicitUsings>
+     <AssemblyName>FlashNextVelocity</AssemblyName>
+     <RootNamespace>FlashNextVelocity.Desktop</RootNamespace>
+-    <Version>1.0.6</Version>
++    <Version>1.0.8</Version>
+     <ApplicationManifest>app.manifest</ApplicationManifest>
+     <ApplicationIcon>..\..\assets\FlashNextVelocity.ico</ApplicationIcon>
+   </PropertyGroup>
+--- a/src/desktop/app.manifest
++++ b/src/desktop/app.manifest
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+-  <assemblyIdentity version="1.0.6.0" name="FlashNextVelocity.Desktop" />
++  <assemblyIdentity version="1.0.8.0" name="FlashNextVelocity.Desktop" />
+   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false" /></requestedPrivileges></security></trustInfo>
+   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"><application><supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" /></application></compatibility>
+ </assembly>
+--- a/src/native/main.cpp
++++ b/src/native/main.cpp
+@@ -52,7 +52,7 @@
+ 
+ namespace {
+ 
+-constexpr std::string_view kRuntimeRevision = "fnv-halo-greedy-mtp-recovery-v9";
++constexpr std::string_view kRuntimeRevision = "fnv-top-wins-deferred-frontier-v10";
+ 
+ struct Config {
+   std::string model;
+@@ -1674,14 +1674,14 @@
+       SendResponse(client, {200,"text/html; charset=utf-8",DashboardHtml(runtime)}); closesocket(client); return;
+     }
+     if (request->method == "GET" && request->path == "/v1") {
+-      Value v = Value::object(); v["name"] = "FlashNextVelocity"; v["version"] = "1.0.6";
++      Value v = Value::object(); v["name"] = "FlashNextVelocity"; v["version"] = "1.0.8";
+       Value endpoints = Value::array(); endpoints.push_back("/v1/models"); endpoints.push_back("/v1/chat/completions"); endpoints.push_back("/v1/completions"); endpoints.push_back("/health"); endpoints.push_back("/metrics"); endpoints.push_back("/dashboard"); v["endpoints"] = endpoints;
+       SendResponse(client, {200,"application/json",v.dump()}); closesocket(client); return;
+     }
+     if (request->method == "GET" && request->path == "/health") {
+       Value v = Value::object();
+       v["status"] = "ok";
+-      v["version"] = "1.0.6";
++      v["version"] = "1.0.8";
+       v["model"] = runtime.model()->ModelName();
+       v["mtp"] = runtime.model()->HasMtp();
+       v["vision"] = static_cast<bool>(runtime.model()->VisionEncoder());
+--- a/tests/native_unit_tests.cpp
++++ b/tests/native_unit_tests.cpp
+@@ -89,6 +89,40 @@
+         "halo-greedy argmax tie break is not stable");
+ }
+ 
++
++static void TestDeferredFrontierTelemetry() {
++  fnvprof::Reset();
++  fnvprof::SetEnabled(true);
++  fnvprof::SetPhase(fnvprof::Phase::Decode);
++
++  // A successful compact verification cycle transfers only the compact
++  // shortlist. The full target row is deferred until an exact fallback needs it.
++  fnvprof::AddVerificationTransfer(0, 4, 8192, 1024);
++  fnvprof::NoteCertificateSuccess();
++  auto report = fnvprof::BuildReport(1.0);
++  Check(report.verify_full_rows_d2h == 0 &&
++            report.verify_compact_rows_d2h == 4 &&
++            report.verify_d2h_bytes == 8192 &&
++            report.verify_compact_candidates == 1024,
++        "compact verification telemetry still charges an eager full row");
++  Check(report.verify_certificate_successes == 1 &&
++            report.verify_certificate_fallbacks == 0,
++        "compact certificate success telemetry is wrong");
++
++  // If the certificate later fails, the exact full row is charged exactly at
++  // fallback time rather than on every compact cycle.
++  fnvprof::NoteCertificateFallback();
++  fnvprof::AddVerificationTransfer(1, 0, 1000000, 0);
++  report = fnvprof::BuildReport(1.0);
++  Check(report.verify_full_rows_d2h == 1 &&
++            report.verify_compact_rows_d2h == 4 &&
++            report.verify_d2h_bytes == 1008192,
++        "deferred full-row fallback telemetry is wrong");
++  Check(report.verify_certificate_successes == 1 &&
++            report.verify_certificate_fallbacks == 1,
++        "compact certificate fallback telemetry is wrong");
++}
++
+ static void TestProposalSourceTelemetry() {
+   fnvprof::Reset();
+   fnvprof::SetEnabled(true);
+@@ -129,6 +163,7 @@
+   try {
+     TestContextLookup();
+     TestHaloGreedyProposal();
++    TestDeferredFrontierTelemetry();
+     TestProposalSourceTelemetry();
+     std::cout << "FlashNextVelocity native unit tests passed.\n";
+     return 0;

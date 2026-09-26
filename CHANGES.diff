@@ -1,0 +1,51 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,4 +1,10 @@
+ cmake_minimum_required(VERSION 3.30)
++
++# This runtime is intentionally Strix Halo-only. Pin the HIP architecture before
++# project()/HIP language initialization so a fresh or auto-reset CMake cache can
++# never fall back to a detected/default architecture.
++set(CMAKE_HIP_ARCHITECTURES "gfx1151" CACHE STRING "Strix Halo target" FORCE)
++
+ project(FlashNextVelocityEngine LANGUAGES C CXX HIP)
+ 
+ set(CMAKE_C_STANDARD 17)
+@@ -7,8 +13,6 @@
+ set(CMAKE_CXX_EXTENSIONS OFF)
+ set(CMAKE_HIP_STANDARD 20)
+ set(CMAKE_HIP_STANDARD_REQUIRED ON)
+-set(CMAKE_HIP_ARCHITECTURES gfx1151 CACHE STRING "Strix Halo target")
+-
+ if(NOT WIN32)
+   message(FATAL_ERROR "FlashNextVelocity Engine builds on Windows only")
+ endif()
+--- a/scripts/build.ps1
++++ b/scripts/build.ps1
+@@ -100,7 +100,7 @@
+ $hb=Get-ChildItem $Rocm -Recurse -Directory -EA SilentlyContinue|Where-Object {$_.FullName -match 'hipblaslt\\library\\gfx1151$'}|Select-Object -First 1
+ if(-not $hb){$hbf=Get-ChildItem $Rocm -Recurse -File -Filter 'TensileLibrary_lazy_gfx1151.*' -EA SilentlyContinue|Where-Object {$_.FullName -match 'hipblaslt'}|Select-Object -First 1;if($hbf){$hb=$hbf.Directory}}
+ if(-not $hb){throw "hipBLASLt gfx1151 library assets missing under $Rocm"}
+-$env:ROCM_PATH=$Rocm;$env:HIP_PATH=$Rocm;$env:PATH="$(Join-Path $Rocm 'bin');$($clangxx.Directory.FullName);$env:PATH"
++$env:ROCM_PATH=$Rocm;$env:HIP_PATH=$Rocm;$env:HIP_CLANG_PATH=$clangxx.Directory.FullName;$env:HIP_PLATFORM='amd';$env:PATH="$(Join-Path $Rocm 'bin');$($clangxx.Directory.FullName);$env:PATH"
+ if($bitcode){$env:HIP_DEVICE_LIB_PATH=$bitcode.Directory.FullName;$env:DEVICE_LIB_PATH=$bitcode.Directory.FullName}
+ if($rb){$env:ROCBLAS_TENSILE_LIBPATH=$rb.FullName}
+ $env:HIPBLASLT_TENSILE_LIBPATH=$hb.FullName
+@@ -116,7 +116,16 @@
+ 
+ # Native engine.
+ $toolchain=Join-Path $Vcpkg 'scripts\buildsystems\vcpkg.cmake';$prefix=$Rocm.Replace('\','/')
+-& cmake.exe -S $Root -B $Build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DGUFO_ROOT=$($Gufo.Replace('\','/'))" "-DCMAKE_TOOLCHAIN_FILE=$($toolchain.Replace('\','/'))" -DVCPKG_TARGET_TRIPLET=x64-windows "-DCMAKE_PREFIX_PATH=$prefix" "-DCMAKE_C_COMPILER=$($clang.Replace('\','/'))" "-DCMAKE_CXX_COMPILER=$($clangxx.FullName.Replace('\','/'))" "-DCMAKE_HIP_COMPILER=$($clangxx.FullName.Replace('\','/'))" "-DCMAKE_HIP_COMPILER_ROCM_ROOT=$prefix" -DCMAKE_HIP_ARCHITECTURES=gfx1151;if($LASTEXITCODE -ne 0){throw 'CMake configure failed.'}
++# Always configure from a fresh CMake cache. Reusing a cache can retain absolute HIP/ROCm
++# paths from an older project location (for example C:\flashfknworkalready) and can also
++# trigger CMake's compiler-change auto-reset, which drops non-persistent configure state.
++& cmake.exe --fresh -S $Root -B $Build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DGUFO_ROOT=$($Gufo.Replace('\','/'))" "-DCMAKE_TOOLCHAIN_FILE=$($toolchain.Replace('\','/'))" -DVCPKG_TARGET_TRIPLET=x64-windows "-DCMAKE_PREFIX_PATH=$prefix" "-DCMAKE_C_COMPILER=$($clang.Replace('\','/'))" "-DCMAKE_CXX_COMPILER=$($clangxx.FullName.Replace('\','/'))" "-DCMAKE_HIP_COMPILER=$($clangxx.FullName.Replace('\','/'))" "-DCMAKE_HIP_COMPILER_ROCM_ROOT=$prefix" -DCMAKE_HIP_ARCHITECTURES=gfx1151;if($LASTEXITCODE -ne 0){throw 'CMake configure failed.'}
++$CmakeCache=Join-Path $Build 'CMakeCache.txt'
++if(-not(Test-Path $CmakeCache)){throw 'CMake configure completed without producing CMakeCache.txt.'}
++$CmakeCacheText=Get-Content $CmakeCache -Raw
++if($CmakeCacheText -notmatch '(?m)^CMAKE_HIP_ARCHITECTURES:STRING=gfx1151\r?$'){throw 'Fresh CMake cache is not pinned to gfx1151.'}
++if($CmakeCacheText -match '(?i)C:\\flashfknworkalready'){throw 'Fresh CMake cache still contains a legacy C:\flashfknworkalready path.'}
++Write-Host 'Fresh CMake cache verified: gfx1151 + project-local ROCm.' -ForegroundColor Green
+ & cmake.exe --build $Build --target FlashNextVelocityEngine -j 16;if($LASTEXITCODE -ne 0){throw 'Native engine build failed.'}
+ $EngineBin=Join-Path $Build 'bin';$EngineExe=Join-Path $EngineBin 'FlashNextVelocity.Engine.exe';if(-not(Test-Path $EngineExe)){throw 'Native engine executable missing after build.'}
+ 

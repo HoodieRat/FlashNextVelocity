@@ -1,0 +1,23 @@
+FlashNextVelocity v1.0.9 incremental root-overlay contents (apply on v1.0.8)
+
+M  README.md
+M  VERSION.json
+A  README-FIRST-v1.0.9.txt
+A  MTP-HC-GROUPNORM-v1.0.9.md
+A  CHANGED-FILES-v1.0.9.txt
+M  gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
+M  gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/batch.cpp
+M  scripts/apply-gufo-overlay.ps1
+M  scripts/build.ps1
+M  src/native/main.cpp
+M  src/desktop/EngineManager.cs
+A  VALIDATION-v1.0.9.txt
+A  OVERLAY-MANIFEST-v1.0.9.json
+
+Core correction:
+- MTP hidden handoff RMSNorm changed from one HC*hidden group to independent per-HC-stream groups.
+- Single-session and batched ROCm paths use the same geometry.
+- Pinned Gufo scalar reference is patched during overlay application.
+- BUILD.bat source gates reject regression.
+- Runtime revision: fnv-mtp-hc-groupnorm-v11.
+- v1.0.8 adaptive Top-64/128/256 exact verification remains active.

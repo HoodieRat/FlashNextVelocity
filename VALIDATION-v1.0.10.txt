@@ -1,0 +1,13 @@
+FlashNextVelocity v1.0.10 validation
+
+PASS: Portable native MTP/context-lookup/profiler unit tests compiled and passed on the build host used to assemble this overlay.
+PASS: Full 15-file inherited Gufo overlay is included; v1.0.8/v1.0.9 performance/correctness sources are not omitted.
+PASS: Async halo chain uses device-token feedback, a contiguous GPU draft-token buffer, one bulk D2H, and one explicit chain-end stream synchronization.
+PASS: Compact verification retains the full final target frontier device-to-device and lazily downloads it only on certificate fallback/snapshot.
+PASS: Snapshot creation materializes a GPU-retained authoritative frontier when required.
+PASS: Device-only rollback returns without a host stream synchronization; host frontier rollback still synchronizes.
+PASS: Per-HC-stream MTP hidden RMSNorm remains active in single-session and batched paths.
+PASS: Exact Top-64/128/256 compact verification source and dispatch markers remain present.
+PASS: Runtime revision is consistent across engine/Desktop/build gate: fnv-async-halo-pipeline-v12.
+
+NOT RUN HERE: Windows ROCm/gfx1151 compile and runtime benchmark. BUILD.bat performs those gates on the target machine.

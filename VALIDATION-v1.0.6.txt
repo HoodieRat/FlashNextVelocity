@@ -1,0 +1,10 @@
+FlashNextVelocity v1.0.6 overlay validation
+
+PASS: Reapplied overlay onto a fresh extraction of the user-supplied 2026-09-25 18:20:07 AI-context bundle.
+PASS: All 16 patched/new project-file SHA-256 values match OVERLAY-MANIFEST-v1.0.6.json after reapply.
+PASS: C++20 portable native unit tests pass, including context lookup, proposal-source telemetry, and halo-greedy MTP argmax/confidence/tie behavior.
+PASS: VERSION.json and config.example.json parse as valid JSON.
+PASS: Runtime revision is consistent across native engine, Desktop health gate, and BUILD.ps1: fnv-halo-greedy-mtp-recovery-v9.
+PASS: Build gate checks the halo-greedy proposal path, deterministic compact verifier, recurrent-state catch-up invariant, Top-256 fallback path, existing gfx1151 scheduler fix, and stale-runtime marker.
+
+Environment limitation: this sandbox is Linux and does not contain the Windows .NET SDK / native ROCm gfx1151 toolchain, so the final Windows HIP engine + WinForms build cannot be executed here. BUILD.bat remains the authoritative machine-local gate and will stop on a stale/mismatched source or runtime.

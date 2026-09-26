@@ -1,0 +1,128 @@
+{
+  "name": "FlashNextVelocity v1.0.8 Top-Wins Root Overlay",
+  "baseline_version": "1.0.6",
+  "patched_version": "1.0.8",
+  "baseline_gufo_commit": "9cad13974cf6da0cd3674b4e0a88b14b7e4a2908",
+  "runtime_revision": "fnv-top-wins-deferred-frontier-v10",
+  "payload_file_count": 16,
+  "payload": [
+    {
+      "path": "BENCHMARK-TOP-WINS.bat",
+      "status": "added",
+      "baseline_sha256": null,
+      "patched_sha256": "3c207d14a323e2a88b5990b5bdf656fc65c0f104701c47f12c4e2e8e0474d987",
+      "patched_bytes": 221
+    },
+    {
+      "path": "OPTIMIZATION-PASS-v1.0.8.md",
+      "status": "added",
+      "baseline_sha256": null,
+      "patched_sha256": "cc695cfc2a28fb9305c02db7e94d0ffa0b515dd8c87bf4a1ee00111071ddb052",
+      "patched_bytes": 7605
+    },
+    {
+      "path": "README.md",
+      "status": "modified",
+      "baseline_sha256": "6383548a4a83c15239053ec2a834684512c8f465b5acdca50f3c04b545241993",
+      "patched_sha256": "61863daab5ba1eae638d0bb97619db371150dc4929d0646256a2fea0cbeeb21b",
+      "patched_bytes": 9575
+    },
+    {
+      "path": "RUN.bat",
+      "status": "modified",
+      "baseline_sha256": "ccffb0a5df60032f577d0ae9ee8de020f3593bc25fd186a3cda7d2ad1e3990de",
+      "patched_sha256": "245676c8eed0eb95cb2ef53b3f0bcd86211a6e15e7e323f5109cc83a36a3a050",
+      "patched_bytes": 418
+    },
+    {
+      "path": "VERSION.json",
+      "status": "modified",
+      "baseline_sha256": "ac5d96c1245c10b4427cbebb83a7bc67c1b2fdf2ee14187c8a05d6b849a2dd25",
+      "patched_sha256": "343d9d38432641f64157511f358c101b5ac9fe9be91a0e52c14f57cdff9473ef",
+      "patched_bytes": 367
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.cpp",
+      "status": "modified",
+      "baseline_sha256": "3a25996e50b552ad91f1c31d54e253fd4ebb5b11ec73de10dca1094524330ec6",
+      "patched_sha256": "9696db0899414a75af73dca7eee075ee94e7a49866b7422b126f9177fea013c2",
+      "patched_bytes": 57977
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.hpp",
+      "status": "modified",
+      "baseline_sha256": "99680a292a2d7fb02c5f3e46ee2e1978695fd1224494d71776f7e68fbdda4ef2",
+      "patched_sha256": "aa92b9f0cf0a8e66defabdf6e92dc75e54dbd5b3d37e7f8ca7ad82e838b163bd",
+      "patched_bytes": 14324
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp",
+      "status": "modified",
+      "baseline_sha256": "c83f2202740e97fd297f58ab8651fadc9c6407b74311ba5728f765d091923c29",
+      "patched_sha256": "8f2f4acc39144049e6b58e87461c1032d8db9ed4168d50cd7dc4729df2584947",
+      "patched_bytes": 128643
+    },
+    {
+      "path": "scripts/benchmark-top-wins.ps1",
+      "status": "added",
+      "baseline_sha256": null,
+      "patched_sha256": "d10b2e5b0bcf844fa218fa1615882046045111ffe47fa878b14240e0aefc8b7a",
+      "patched_bytes": 11372
+    },
+    {
+      "path": "scripts/build.ps1",
+      "status": "modified",
+      "baseline_sha256": "59c7712f0d4d7eff111fc48b8a8ba9523a45d1a07c44f88683c2d9ff7b466ccb",
+      "patched_sha256": "80b1fb5e31e2b6fb05287efb0d0f1282f17a610f445c4044353afb4cdd38189b",
+      "patched_bytes": 25078
+    },
+    {
+      "path": "scripts/ensure-local-rocm.ps1",
+      "status": "modified",
+      "baseline_sha256": "ab69d5cb75f07fdf17f7957542ae0365a234c4804a55a30267ea40a370698810",
+      "patched_sha256": "077c2141d18cbffb3f7e6db38d5dfb519ee6bf53c6636b63ee2d95861ed23227",
+      "patched_bytes": 6819
+    },
+    {
+      "path": "src/desktop/EngineManager.cs",
+      "status": "modified",
+      "baseline_sha256": "4884bd7fc737a5e3876ecadef1db58683be74f7e1c061fc64ddc6f7111baf164",
+      "patched_sha256": "9ff2d3734589b58f559ee22bac2394fdaabe756459dea89a5b874242ed756291",
+      "patched_bytes": 14098
+    },
+    {
+      "path": "src/desktop/FlashNextVelocity.Desktop.csproj",
+      "status": "modified",
+      "baseline_sha256": "4bdbe388a99c2e16c036245a26f92b90be2b14da8ed98bb837cec8fe6cb339f9",
+      "patched_sha256": "6c6617bffc9b7fc5f2681f30e0834a66aa75d1f9b5e842091ff6b29dd0bfedc8",
+      "patched_bytes": 567
+    },
+    {
+      "path": "src/desktop/app.manifest",
+      "status": "modified",
+      "baseline_sha256": "60168215bdb1d27585af86b5a0a0f582b0035998a65735c7d577df581bbd0a58",
+      "patched_sha256": "3fb9e4a848fa807973030b9f429ee637b9abee78aea98e1523a0bc979b0bcac6",
+      "patched_bytes": 563
+    },
+    {
+      "path": "src/native/main.cpp",
+      "status": "modified",
+      "baseline_sha256": "d0b07050bcd07b1cc9c663b11d1676a0fb35d24d86c0fb2eeeab7cc0b5a95b2c",
+      "patched_sha256": "63befed293208335340c303822a4d073c6930e546bd061bda82a878c0bb7fd73",
+      "patched_bytes": 96561
+    },
+    {
+      "path": "tests/native_unit_tests.cpp",
+      "status": "modified",
+      "baseline_sha256": "37f332270074aea76610c441db079150fa344c27e660d1f8b83e810b0f4cc74e",
+      "patched_sha256": "01cd735ea60b74bc18142a1112730139e0bc21f76adfde410b02c56296a57849",
+      "patched_bytes": 7363
+    }
+  ],
+  "delivery_metadata": [
+    "README-FIRST-v1.0.8.txt",
+    "VALIDATION-v1.0.8.txt",
+    "TOP-WINS-PATCH-v1.0.8.diff",
+    "OVERLAY-MANIFEST-v1.0.8.json"
+  ]
+}

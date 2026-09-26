@@ -1,0 +1,98 @@
+{
+  "name": "FlashNextVelocity v1.0.9 HOTFIX2 Compact Verification Source Repair",
+  "base": "v1.0.9 + HOTFIX1 (also safe over v1.0.9 directly)",
+  "runtime_revision": "fnv-mtp-hc-groupnorm-v11",
+  "purpose": "Re-supply the complete intended Gufo overlay and validate the real Top-64/128/256 compact verification implementation plus synchronized final frontier.",
+  "files": [
+    {
+      "path": "README-HOTFIX2.txt",
+      "sha256": "12AD5446B96B01E3C074E2DF244CBD44BBA2DA1667083D505CE34ED4E2CEA13A",
+      "size_bytes": 1012
+    },
+    {
+      "path": "gufo-overlay/src/core/sampling.hpp",
+      "sha256": "AB84F0C9883FF2771A5EC72AFFFEAE10819332ED7CCFD7E84F40B4D8F49D7ABB",
+      "size_bytes": 5242
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/context_lookup.hpp",
+      "sha256": "86BA984044B66DF11AF5E6E0DA13E566ED75A11E910B0F3703BC7149031DBAFE",
+      "size_bytes": 3667
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.cpp",
+      "sha256": "DFAE6795B0F632F31136FFE4DC5D8CACE1F78893BA8B0BEB513E94905B1C5026",
+      "size_bytes": 57594
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/engine.hpp",
+      "sha256": "C7A583068BD1218E04925AADB98691C989C113144A761E870D7661BF3E5468BA",
+      "size_bytes": 14025
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/batch.cpp",
+      "sha256": "6B20FFB78F40DF510B035B52C786A3CBC1039471A89775CBE2CB6A36D0E9E915",
+      "size_bytes": 41871
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/blaslt.cpp",
+      "sha256": "EB927183004045502FEA8987164CED7360B2487353C0F3EFA146E174D2E4F67F",
+      "size_bytes": 6251
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/blaslt.hpp",
+      "sha256": "B5BCA7EC7E7B69CF6DF64B6B966DEA227DF1C88CF7BD0E6EF911126DC9D0A228",
+      "size_bytes": 1527
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/device_model.cpp",
+      "sha256": "F576EDF017A318949AB321970D76B3DE5857562D827FAB71810B21704B6AFB63",
+      "size_bytes": 12929
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp",
+      "sha256": "75D59C4C1F115D9669D0C1534735A4371043A692D50A6A394EF90E791044D9CA",
+      "size_bytes": 131192
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.hpp",
+      "sha256": "042E7D8EB5B7BC05D9B0B1B5F9B234CBEEEC9168FF107A19904A30390D9F2FB2",
+      "size_bytes": 27828
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp",
+      "sha256": "75FA14A08D37E12EA5DE8C29A69CB5B2BF52F64F0F18E50E71EFA8BEF32474C5",
+      "size_bytes": 250007
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hpp",
+      "sha256": "1368A19C7730311BE3EDC3A9DAAEF5B61026D1674E323049AB687E0571619AF6",
+      "size_bytes": 29248
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/mtp_costs.hpp",
+      "sha256": "EA66E5BD617C7F542D6A40CD055E1CFA04F8E2EAD3EFCC8DCFE52CC0103C42E7",
+      "size_bytes": 3781
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/mtp_sampling.hpp",
+      "sha256": "D04AE8AFC0422F8331A2C4328349EEC69FAF056381BB04E815E9AE532EACF450",
+      "size_bytes": 17044
+    },
+    {
+      "path": "gufo-overlay/src/models/qwen38_flash_next/ngram.cpp",
+      "sha256": "AE42DB0D912352154884945A1D1EC2997C81984BEA3748984D37FAD2D8FDC902",
+      "size_bytes": 10540
+    },
+    {
+      "path": "scripts/apply-gufo-overlay.ps1",
+      "sha256": "9E0F1D83D81110850538A58F0EE9792FAE075A78B8FB4CF81763E3726A6F6563",
+      "size_bytes": 7797
+    },
+    {
+      "path": "scripts/build.ps1",
+      "sha256": "C29B18F5913AFB6ABCE88C6F105E486117C228A3438F622E70232C88A1565E60",
+      "size_bytes": 27749
+    }
+  ]
+}

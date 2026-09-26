@@ -1,0 +1,16 @@
+FlashNextVelocity v1.0.10 root-overlay payload
+
+Core modified sources:
+- gufo-overlay/src/models/qwen38_flash_next/engine.cpp
+- gufo-overlay/src/models/qwen38_flash_next/engine.hpp
+- gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
+- gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.hpp
+- gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/batch.cpp
+- src/native/main.cpp
+- src/desktop/EngineManager.cs
+- scripts/build.ps1
+- VERSION.json
+
+The ZIP also re-supplies the complete known-good Gufo overlay inherited from v1.0.9 HOTFIX2 so Top-64/128/256 exact verification, mapped sampler support, context lookup, gfx1151 fixes, and calibrated MTP costs cannot disappear through partial patch stacking.
+
+Runtime revision: fnv-async-halo-pipeline-v12

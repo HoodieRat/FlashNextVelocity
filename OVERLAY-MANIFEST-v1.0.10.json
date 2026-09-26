@@ -1,0 +1,110 @@
+{
+  "name": "FlashNextVelocity v1.0.10 Async Halo Pipeline Root Overlay",
+  "version": "1.0.10",
+  "runtime_revision": "fnv-async-halo-pipeline-v12",
+  "base": "v1.0.9 + HOTFIX2 (full inherited Gufo overlay re-supplied)",
+  "apply": "Extract directly over the project root and replace files, then run BUILD.bat.",
+  "benchmark_first": {
+    "draft_max": 3,
+    "draft_confidence": 0.0,
+    "mtp_proposal_mode": "halo_greedy"
+  },
+  "files": {
+    "CHANGED-FILES-v1.0.10.txt": {
+      "sha256": "58C0022EAA8C6FBAFCA265FF146BD373D32089E658E91824F9094F83E289F840",
+      "bytes": 783
+    },
+    "OPTIMIZATION-PASS-v1.0.10.md": {
+      "sha256": "131A02BE397379F63B104DCB135A9ECD2D7DEF47A7CD2A14E266B2A970539C3B",
+      "bytes": 2544
+    },
+    "README-FIRST-v1.0.10.txt": {
+      "sha256": "662BFB459AD97503212E4B4DDCB7387901B80F423B16B006474A30613755B70C",
+      "bytes": 1758
+    },
+    "VALIDATION-v1.0.10.txt": {
+      "sha256": "1DDD486DF0D5C4E3B5A3F14161240D812AAFD035A3CF17F77F7209E07DBC2E92",
+      "bytes": 1196
+    },
+    "VERSION.json": {
+      "sha256": "09397481AC790C1D73A700D326F4A9F349B498C4CE18AB4579B296EEB5F8D427",
+      "bytes": 504
+    },
+    "gufo-overlay/src/core/sampling.hpp": {
+      "sha256": "AB84F0C9883FF2771A5EC72AFFFEAE10819332ED7CCFD7E84F40B4D8F49D7ABB",
+      "bytes": 5242
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/context_lookup.hpp": {
+      "sha256": "86BA984044B66DF11AF5E6E0DA13E566ED75A11E910B0F3703BC7149031DBAFE",
+      "bytes": 3667
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/engine.cpp": {
+      "sha256": "4B5C843AFB56E2DC2617D26BAE0F854EACE416A08B38C4DB916B0C2848645A56",
+      "bytes": 60595
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/engine.hpp": {
+      "sha256": "34578C5612E5EC7AB9B98A626BB12881CFADC1B02D4ECFBBAB638C4884404158",
+      "bytes": 14186
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/batch.cpp": {
+      "sha256": "4E17C2D7090F3DAE0DF0BB653DC203BC0992BE9710A09BFB060342675966ED3B",
+      "bytes": 40916
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/blaslt.cpp": {
+      "sha256": "EB927183004045502FEA8987164CED7360B2487353C0F3EFA146E174D2E4F67F",
+      "bytes": 6251
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/blaslt.hpp": {
+      "sha256": "B5BCA7EC7E7B69CF6DF64B6B966DEA227DF1C88CF7BD0E6EF911126DC9D0A228",
+      "bytes": 1527
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/device_model.cpp": {
+      "sha256": "F576EDF017A318949AB321970D76B3DE5857562D827FAB71810B21704B6AFB63",
+      "bytes": 12929
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp": {
+      "sha256": "EC0F08D8664484F61BB333E74172927C2BFC4B3FDCD97E8038397B902C82CA66",
+      "bytes": 137629
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.hpp": {
+      "sha256": "AD0716002114FA834B8D287D5AAE3FCB5E7EFA0981C5625E4FBF8F6B8CCD22B0",
+      "bytes": 30242
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp": {
+      "sha256": "75FA14A08D37E12EA5DE8C29A69CB5B2BF52F64F0F18E50E71EFA8BEF32474C5",
+      "bytes": 250007
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hpp": {
+      "sha256": "1368A19C7730311BE3EDC3A9DAAEF5B61026D1674E323049AB687E0571619AF6",
+      "bytes": 29248
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/mtp_costs.hpp": {
+      "sha256": "EA66E5BD617C7F542D6A40CD055E1CFA04F8E2EAD3EFCC8DCFE52CC0103C42E7",
+      "bytes": 3781
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/mtp_sampling.hpp": {
+      "sha256": "D04AE8AFC0422F8331A2C4328349EEC69FAF056381BB04E815E9AE532EACF450",
+      "bytes": 17044
+    },
+    "gufo-overlay/src/models/qwen38_flash_next/ngram.cpp": {
+      "sha256": "AE42DB0D912352154884945A1D1EC2997C81984BEA3748984D37FAD2D8FDC902",
+      "bytes": 10540
+    },
+    "scripts/apply-gufo-overlay.ps1": {
+      "sha256": "9E0F1D83D81110850538A58F0EE9792FAE075A78B8FB4CF81763E3726A6F6563",
+      "bytes": 7797
+    },
+    "scripts/build.ps1": {
+      "sha256": "C603B01EA893FFCFCC76CD11FE105A1A078693C267031E5B7C23CA0810699023",
+      "bytes": 29234
+    },
+    "src/desktop/EngineManager.cs": {
+      "sha256": "E253EA8F9128F3ADCA773CB1783AE05019177DE86F6EA530AC6DD2F8D1E82DCB",
+      "bytes": 14091
+    },
+    "src/native/main.cpp": {
+      "sha256": "E5CF4790BA3FFA008C1A26128FB47F31CF71112BE4922D8746C2B1EFC6C304AC",
+      "bytes": 99930
+    }
+  }
+}

@@ -1,0 +1,16 @@
+FlashNextVelocity build hotfix - 2026-09-25
+
+Fixes the configure failure that shows both:
+  HIP: Using hipcc from relative path: C:/flashfknworkalready/...
+  This build is intentionally pinned to gfx1151
+
+Apply:
+1. Extract this ZIP over the FlashNextVelocity Studio project root.
+2. Replace the two files when prompted.
+3. Run BUILD.bat again.
+
+What changed:
+- CMakeLists.txt pins CMAKE_HIP_ARCHITECTURES=gfx1151 before project(... HIP), so an internal CMake cache reset cannot lose the target.
+- scripts/build.ps1 now runs `cmake --fresh`, preventing stale compiler/HIP paths from an older project root from being reused.
+- Build environment explicitly points HIP/ROCm/Clang at the project-local .deps\\rocm.
+- Post-config validation fails immediately if the fresh cache is not gfx1151 or still contains C:\\flashfknworkalready.

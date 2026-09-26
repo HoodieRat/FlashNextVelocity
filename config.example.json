@@ -1,0 +1,32 @@
+{
+  "model": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+  "mtp": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\MTP\\mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+  "mmproj": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\mmproj-F16.gguf",
+  "host": "127.0.0.1",
+  "port": 8080,
+  "context": 131072,
+  "draft_max": 7,
+  "draft_confidence": 0.0,
+  "mtp_proposal_mode": "halo_greedy",
+  "prefill_batch": 2048,
+  "context_lookup": true,
+  "context_lookup_min_ngram": 3,
+  "context_lookup_max_ngram": 6,
+  "context_lookup_window": 32768,
+  "context_lookup_min_draft": 2,
+  "memory_guard": true,
+  "memory_guard_min_available_gib": 8.0,
+  "sessions": 1,
+  "default_max_tokens": 4096,
+  "thinking": true,
+  "preserve_thinking": false,
+  "reasoning_effort": "medium",
+  "sampling": {
+    "temperature": 0.35,
+    "top_p": 0.9,
+    "top_k": 40,
+    "min_p": 0.05,
+    "repeat_penalty": 1.05,
+    "repeat_last_n": 512
+  }
+}
