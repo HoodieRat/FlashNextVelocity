@@ -34,6 +34,8 @@ void RestoreGdnState(float* state, RollbackRows snapshots, std::uint32_t keep,
                      std::uint32_t k_heads, std::uint32_t v_heads,
                      hipStream_t stream);
 
+void SignalDone(std::uint32_t* flag, std::uint32_t value, hipStream_t stream);
+
 /// GGUF type ids the runtime accepts for the small-matrix and lookup paths.
 enum class WeightType : std::uint32_t {
   kF32 = 0,

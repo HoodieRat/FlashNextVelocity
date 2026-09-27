@@ -1888,6 +1888,11 @@ int main(int argc, char** argv) {
       if (arg == "--config" && i + 1 < argc) config_path = argv[++i];
       else if (arg == "--help" || arg == "-h") { PrintUsage(); return 0; }
     }
+    // Production enables only the Prompt 6 winner. An explicit environment
+    // value (including "none" for A/B validation) always takes precedence.
+    if (std::getenv("GUFO_PLATFORM_TUNING") == nullptr &&
+        _putenv_s("GUFO_PLATFORM_TUNING", "none,+flag_waits") != 0)
+      throw std::runtime_error("could not set Gufo platform tuning");
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK)
       throw std::runtime_error("curl_global_init failed");
     struct CurlCleanup { ~CurlCleanup(){ curl_global_cleanup(); } } curl_cleanup;

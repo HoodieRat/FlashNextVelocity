@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -12,11 +13,13 @@
 #include <memory>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
 #include "qfn_mmq.h"
 #include "src/core/hip/snapshot_transfer.hpp"
+#include "src/core/platform/tuning.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
 namespace gufo::models::qwen38_flash_next::rocm {
@@ -389,6 +392,12 @@ std::uint32_t IndexerCapacity(const Config& c, std::uint32_t batch,
       context, std::uint64_t{c.indexer_top_k} + batch)));
 }
 
+const platform::Tuning& Tune() { return platform::PlatformTuning(); }
+
+unsigned ResultHostFlags() {
+  return Tune().flag_waits ? hipHostMallocCoherent : hipHostMallocDefault;
+}
+
 }  // namespace
 
 Session::~Session() {
@@ -540,7 +549,7 @@ Executor::~Executor() {
         static_cast<void*>(mtp_chain_controls_host_),
         static_cast<void*>(counts_host_), static_cast<void*>(mtp_candidates_host_),
         static_cast<void*>(mtp_verify_candidates_host_),
-        static_cast<void*>(tiles_host_)}) {
+        static_cast<void*>(tiles_host_), static_cast<void*>(done_flag_)}) {
     if (p != nullptr) {
       (void)hipHostFree(p);
     }
@@ -697,9 +706,19 @@ std::unique_ptr<Executor> Executor::Create(const DeviceModel& model,
                "pinned token buffer", error_msg) ||
         !Check(hipHostMalloc(&logits, static_cast<std::size_t>(
                                           e->options_.max_logit_rows) *
-                                          c.vocab_size * sizeof(float)),
+                                          c.vocab_size * sizeof(float),
+                             ResultHostFlags()),
                "pinned logits buffer", error_msg)) {
       return nullptr;
+    }
+    if (Tune().flag_waits) {
+      void* done = nullptr;
+      if (!Check(hipHostMalloc(&done, 64, hipHostMallocCoherent),
+                 "pinned completion flag", error_msg)) {
+        return nullptr;
+      }
+      e->done_flag_ = static_cast<std::uint32_t*>(done);
+      *e->done_flag_ = 0;
     }
     void* counts = nullptr;
     if (!Check(hipHostMalloc(&counts, c.num_experts * sizeof(std::uint32_t)),
@@ -745,7 +764,8 @@ std::unique_ptr<Executor> Executor::Create(const DeviceModel& model,
     // Draft and compact-target selectors both retain raw Top-256; the shared
     // workspace is already sized for the larger verification selector.
     s.mtp_scores = reinterpret_cast<float*>(s.mtp_ids + kMtpCandidates);
-    if (!Check(hipHostMalloc(&e->mtp_token_host_, sizeof(std::int32_t)),
+    if (!Check(hipHostMalloc(&e->mtp_token_host_, sizeof(std::int32_t),
+                             ResultHostFlags()),
                "pinned draft token", error_msg) ||
         !Check(hipHostMalloc(
                    &e->mtp_chain_host_,
@@ -758,12 +778,14 @@ std::unique_ptr<Executor> Executor::Create(const DeviceModel& model,
                        sizeof(Session::Control)),
                    "pinned async MTP controls", error_msg) ||
         !Check(
-            hipHostMalloc(&e->mtp_candidates_host_, sizeof(MtpCandidateLogits)),
+            hipHostMalloc(&e->mtp_candidates_host_, sizeof(MtpCandidateLogits),
+                          ResultHostFlags()),
             "pinned draft candidates", error_msg) ||
         !Check(hipHostMalloc(
                    &e->mtp_verify_candidates_host_,
                    static_cast<std::size_t>(e->options_.max_speculative) *
-                       sizeof(MtpVerificationCandidateLogits)),
+                       sizeof(MtpVerificationCandidateLogits),
+                   ResultHostFlags()),
                    "pinned compact verification candidates", error_msg)) {
       return nullptr;
     }
@@ -1543,6 +1565,28 @@ bool Executor::PleFetch(Session& session, std::span<const std::int32_t> tokens,
   return ple_pending_;
 }
 
+bool Executor::Wait(const char* what, std::string* error_msg) const {
+  if (done_flag_ == nullptr) {
+    return Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize),
+                 what, error_msg);
+  }
+  if (++done_counter_ == 0) ++done_counter_;
+  const std::uint32_t want = done_counter_;
+  SignalDone(done_flag_, want, stream_);
+  if (!Check(hipGetLastError(), what, error_msg)) return false;
+  (void)hipStreamQuery(stream_);  // submit batched launches without blocking
+  const auto start = std::chrono::steady_clock::now();
+  const volatile std::uint32_t* flag = done_flag_;
+  while (*flag != want) {
+    if (std::chrono::steady_clock::now() - start > std::chrono::seconds(1)) {
+      return Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize),
+                   what, error_msg);
+    }
+    std::this_thread::yield();
+  }
+  return true;
+}
+
 bool Executor::WaitPle(std::string* error_msg) const {
   const bool ok = ple_pending_ && ngram_->WaitRead();
   ple_pending_ = false;
@@ -2304,7 +2348,9 @@ bool Executor::Forward(Session& session, std::span<const std::int32_t> tokens,
       !WaitPle(error_msg)) {
     return false;
   }
-  if (!Run(session, key, graph, body, error_msg)) {
+  const bool flag_wait = graph && done_flag_ != nullptr;
+  if (!Run(session, key, graph, body, error_msg, !flag_wait) ||
+      (flag_wait && !Wait("forward", error_msg))) {
     return false;
   }
   if (speculative) {
@@ -3127,7 +3173,10 @@ bool Executor::MtpForwardQueued(
                    graph ? graph_pool : pool, hidden_source, trace,
                    device_token, control_source, token_device, token_host);
   };
-  if (!Run(session, key, graph, body, error_msg, synchronize)) return false;
+  const bool flag_wait = synchronize && graph && done_flag_ != nullptr;
+  if (!Run(session, key, graph, body, error_msg,
+           synchronize && !flag_wait) ||
+      (flag_wait && !Wait("MTP forward", error_msg))) return false;
   session.mtp_.position = pos + n;
   if (sparse) session.mtp_.blocks = complete;
   return true;

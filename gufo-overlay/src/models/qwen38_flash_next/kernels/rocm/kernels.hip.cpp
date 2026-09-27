@@ -5500,6 +5500,20 @@ void PleInject(float* res, const float* gated, const float* conv,
                      stream, res, gated, conv, count);
 }
 
+namespace {
+__global__ void SignalDoneKernel(volatile std::uint32_t* flag,
+                                 std::uint32_t value) {
+  __threadfence_system();
+  *flag = value;
+  __threadfence_system();
+}
+}  // namespace
+
+void SignalDone(std::uint32_t* flag, std::uint32_t value, hipStream_t stream) {
+  hipLaunchKernelGGL(SignalDoneKernel, dim3(1), dim3(1), 0, stream, flag,
+                     value);
+}
+
 void RestoreGdnState(float* state, RollbackRows snapshots, std::uint32_t keep,
                      std::uint32_t k_heads, std::uint32_t v_heads,
                      hipStream_t stream) {

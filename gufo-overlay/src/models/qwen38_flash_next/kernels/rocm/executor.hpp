@@ -397,6 +397,7 @@ private:
   bool PleFetch(Session& s, std::span<const std::int32_t> tokens,
                 bool speculative, std::string* error_msg) const;
   bool WaitPle(std::string* error_msg) const;
+  bool Wait(const char* what, std::string* error_msg) const;
   bool Ple(const DeviceLayer& l, Session& s, std::uint32_t n_tokens, float* res,
            bool speculative, std::string* error_msg,
            bool embeddings_ready = false) const;
@@ -602,6 +603,8 @@ private:
   Session::Control* mtp_chain_controls_host_{nullptr};
   MtpCandidateLogits* mtp_candidates_host_{nullptr};
   MtpVerificationCandidateLogits* mtp_verify_candidates_host_{nullptr};
+  std::uint32_t* done_flag_{nullptr};
+  mutable std::uint32_t done_counter_{0};
   /// The model geometry allows the wide mixer route (see Combine).
   bool wide_mixer_{false};
   /// Set by Moe when its epilogue is left for the combine that follows.
