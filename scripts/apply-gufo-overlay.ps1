@@ -20,6 +20,18 @@ foreach($file in $files){
   Copy-Item $file.FullName $destination -Force
 }
 
+# Keep the Windows port's tuning mechanism, but do not enable its new
+# performance policies as FlashNextVelocity defaults in this baseline pass.
+$tuningPath=Join-Path $GufoRoot 'src\core\platform\tuning.hpp'
+$tuning=[IO.File]::ReadAllText($tuningPath)
+if($tuning.Contains('inline constexpr bool kWindowsDefault = true;')){
+  $tuning=$tuning.Replace('inline constexpr bool kWindowsDefault = true;',
+                          'inline constexpr bool kWindowsDefault = false;')
+  [IO.File]::WriteAllText($tuningPath,$tuning,$Utf8NoBom)
+}elseif(-not $tuning.Contains('inline constexpr bool kWindowsDefault = false;')){
+  throw "Gufo platform tuning default changed upstream: $tuningPath"
+}
+
 # sampling.cpp is intentionally not vendored wholesale. Add one narrow helper
 # to the pinned Gufo source. The helper keeps ORIGINAL vocabulary IDs through
 # penalty/filter ordering; this is required for deterministic tie semantics in

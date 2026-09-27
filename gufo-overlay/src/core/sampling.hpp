@@ -87,6 +87,12 @@ public:
                                                    std::span<const TokenId> token_ids) const;
   [[nodiscard]] SamplingDistribution DistributionMapped(
       std::span<const float> logits, std::span<const TokenId> token_ids) const;
+  [[nodiscard]] std::optional<SamplingDistribution> DistributionFromTop(
+      std::span<const float> values, std::span<const TokenId> ids,
+      std::size_t vocab) const;
+  [[nodiscard]] std::optional<TokenId> SampleFromTop(
+      std::span<const float> values, std::span<const TokenId> ids,
+      std::size_t vocab);
   void DeferSample(TokenId token);
   [[nodiscard]] TokenId Sample(std::span<const float> logits);
   [[nodiscard]] TokenId SampleResidual(std::span<const float> target_logits,
@@ -100,6 +106,7 @@ private:
   [[nodiscard]] TokenId SampleGreedy(std::span<const float> logits) const;
   [[nodiscard]] SamplingDistribution LinearDistribution(std::span<const float> logits) const;
   void PrepareSelected(std::span<const float> logits);
+  void FinishSelected(double full_softmax_sum, bool has_full_softmax_sum);
   SamplingConfig config_;
   std::vector<TokenId> history_;
   std::vector<TokenPenalty> penalty_counts_;
