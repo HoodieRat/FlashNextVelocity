@@ -65,6 +65,7 @@ struct Config {
   std::uint32_t draft_max{7};
   float draft_confidence{0.0F};
   std::string mtp_proposal_mode{"halo_greedy"};
+  std::string mtp_draft_vocabulary{"full"};
   std::uint32_t prefill_batch{2048};
   bool context_lookup{true};
   std::uint32_t context_lookup_min_ngram{3};
@@ -115,6 +116,8 @@ struct Metrics {
   bool preserve_thinking{false};
   std::string reasoning_effort{"OFF"};
   std::uint32_t compact_verification_candidates{0};
+  std::uint32_t mtp_draft_vocab_size{0};
+  std::uint64_t mtp_reduced_vocab_proposals{0};
   double temperature{0};
   double top_p{0};
   std::int32_t top_k{0};
@@ -262,6 +265,11 @@ Config LoadConfig(const fs::path& path) {
   if (const auto* v = root.find("memory_guard"); v && v->is_bool()) c.memory_guard = v->as_bool();
   c.memory_guard_min_available_gib = root.member_double("memory_guard_min_available_gib", c.memory_guard_min_available_gib);
   c.sessions = static_cast<std::uint32_t>(root.member_size("sessions", c.sessions));
+  // Qualified production default; an explicit "full" keeps the control path.
+  // Other proposal/session modes retain their existing full vocabulary.
+  c.mtp_draft_vocabulary = root.member_str(
+      "mtp_draft_vocabulary",
+      c.sessions == 1 && c.mtp_proposal_mode == "halo_greedy" ? "latin" : "full");
   c.default_max_tokens = root.member_size("default_max_tokens", c.default_max_tokens);
   if (const auto* v = root.find("thinking"); v && v->is_bool()) c.thinking = v->as_bool();
   if (const auto* v = root.find("preserve_thinking"); v && v->is_bool()) c.preserve_thinking = v->as_bool();
@@ -275,6 +283,10 @@ Config LoadConfig(const fs::path& path) {
     c.sampling.repeat_last_n = s->member_size("repeat_last_n", c.sampling.repeat_last_n);
   }
   c.sampling.Validate();
+  if (c.mtp_draft_vocabulary != "full" && c.mtp_draft_vocabulary != "latin")
+    throw std::runtime_error("mtp_draft_vocabulary must be full or latin");
+  if (c.mtp_draft_vocabulary == "latin" && c.sessions != 1)
+    throw std::runtime_error("latin draft vocabulary requires sessions=1");
   if (c.model.empty()) throw std::runtime_error("config.model is required");
   if (c.context == 0 || c.draft_max == 0 || c.draft_max > 7)
     throw std::runtime_error("context/draft_max is invalid");
@@ -927,6 +939,8 @@ Value MetricsJson(const Metrics& m) {
   v["async_halo_chains"] = static_cast<unsigned long long>(m.async_halo_chains);
   v["async_halo_draft_tokens"] = static_cast<unsigned long long>(m.async_halo_draft_tokens);
   v["mtp_fresh_resets"] = static_cast<unsigned long long>(m.mtp_fresh_resets);
+  v["mtp_draft_vocab_size"] = static_cast<unsigned long long>(m.mtp_draft_vocab_size);
+  v["mtp_reduced_vocab_proposals"] = static_cast<unsigned long long>(m.mtp_reduced_vocab_proposals);
   v["mtp_draft_tokens"] = static_cast<unsigned long long>(m.mtp_drafted);
   v["mtp_draft_tokens_accepted"] = static_cast<unsigned long long>(m.mtp_accepted);
   v["mtp_acceptance"] = m.mtp_drafted ? static_cast<double>(m.mtp_accepted) / static_cast<double>(m.mtp_drafted) : 0.0;
@@ -1228,6 +1242,9 @@ class Runtime {
     gufo::models::qwen38_flash_next::ModelOptions options;
     options.max_context = cfg_.context;
     options.mtp_model_path = cfg_.mtp;
+    options.draft_vocabulary = cfg_.mtp_draft_vocabulary == "latin"
+        ? gufo::models::qwen38_flash_next::DraftVocabulary::kLatinText
+        : gufo::models::qwen38_flash_next::DraftVocabulary::kFull;
     options.max_draft_tokens = cfg_.draft_max;
     options.prefill_batch = cfg_.prefill_batch;
     options.sampled_mtp_proposal_mode = ParseMtpProposalMode(cfg_.mtp_proposal_mode);
@@ -1430,6 +1447,9 @@ class Runtime {
     m.async_halo_draft_tokens = session_->Statistics().async_halo_draft_tokens - stats0.async_halo_draft_tokens;
     m.mtp_fresh_resets = session_->MtpFreshResets();
     m.mtp_drafted = stats1.mtp_drafted - stats0.mtp_drafted;
+    m.mtp_draft_vocab_size = model_->DraftVocabSize();
+    if (m.mtp_draft_vocab_size < model_->VocabSize())
+      m.mtp_reduced_vocab_proposals = m.mtp_drafted;
     m.mtp_accepted = stats1.mtp_accepted - stats0.mtp_accepted;
     const auto mtp_conf_samples = stats1.mtp_confidence_samples - stats0.mtp_confidence_samples;
     const auto mtp_conf_sum = stats1.mtp_confidence_sum - stats0.mtp_confidence_sum;
@@ -1451,6 +1471,7 @@ class Runtime {
     if (profile) {
       fnvprof::SetPhase(fnvprof::Phase::Off);
       m.profile = fnvprof::BuildReport(m.decode_ms);
+      LogDeviceMemory("after profiled request");
     }
     {
       std::lock_guard lock(metrics_mutex_);
@@ -1777,6 +1798,8 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       v["version"] = "1.0.10";
       v["model"] = runtime.model()->ModelName();
       v["mtp"] = runtime.model()->HasMtp();
+      v["mtp_draft_vocabulary"] = runtime.cfg().mtp_draft_vocabulary;
+      v["mtp_draft_vocab_size"] = static_cast<unsigned long long>(runtime.model()->DraftVocabSize());
       v["vision"] = static_cast<bool>(runtime.model()->VisionEncoder());
       v["load_seconds"] = runtime.load_seconds();
       // Expose the exact startup configuration so the Studio can verify that

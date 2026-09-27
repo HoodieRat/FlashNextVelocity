@@ -36,11 +36,21 @@ class Executor;
 class Session;
 }  // namespace rocm
 
+enum class DraftVocabulary {
+  kFull,
+  /// Special tokens plus every token whose text is ASCII (English, code,
+  /// numbers, markup and the unaccented pieces of Latin-script languages)
+  /// or ASCII with common typographic marks: about half of the vocabulary,
+  /// so each draft step reads half of the output head.
+  kLatinText,
+};
+
 struct ModelOptions {
   std::uint32_t max_context = 4096;
   /// Optional MTP draft sidecar (`mtp-...-shared-*.gguf`). Empty leaves
   /// speculative decoding off.
   std::string mtp_model_path;
+  DraftVocabulary draft_vocabulary = DraftVocabulary::kFull;
   /// Maximum proposals per cycle; acceptance history selects the length.
   std::uint32_t max_draft_tokens = kMaxMtpDraftTokens;
   /// Real Gufo prefill chunk / executor max_batch. This is not a llama.cpp
@@ -88,6 +98,7 @@ public:
   [[nodiscard]] std::int32_t EosToken() const noexcept;
   [[nodiscard]] bool IsStopToken(std::int32_t token) const noexcept;
   [[nodiscard]] std::uint32_t VocabSize() const noexcept;
+  [[nodiscard]] std::uint32_t DraftVocabSize() const noexcept;
   [[nodiscard]] std::uint32_t PrefillCapacity() const noexcept;
   [[nodiscard]] std::uint32_t MaxContext() const noexcept {
     return options_.max_context;

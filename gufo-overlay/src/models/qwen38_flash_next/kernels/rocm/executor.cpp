@@ -764,6 +764,54 @@ std::unique_ptr<Executor> Executor::Create(const DeviceModel& model,
     // Draft and compact-target selectors both retain raw Top-256; the shared
     // workspace is already sized for the larger verification selector.
     s.mtp_scores = reinterpret_cast<float*>(s.mtp_ids + kMtpCandidates);
+    // Options::draft_vocab (optional): the draft head proposes only from
+    // these tokens, reading that fraction of the output head per draft
+    // step. Verification still uses the full head, so the output
+    // distribution is unchanged; only acceptance can drop when the target
+    // wants a token outside the list.
+    if (!options.draft_vocab.empty()) {
+      const DeviceTensor& out = model.output();
+      std::vector<std::int32_t> ids;
+      for (const std::int32_t id : options.draft_vocab) {
+        if (id >= 0 && static_cast<std::uint32_t>(id) < out.rows) {
+          ids.push_back(id);
+        }
+      }
+      std::sort(ids.begin(), ids.end());
+      ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+      if (ids.size() < kMtpCandidates || out.type != GgmlType::kQ8_0 ||
+          out.experts != 1 || out.cols % 32 != 0) {
+        AssignError(error_msg,
+                    "the draft vocabulary needs at least 256 valid token ids "
+                    "and a Q8_0 output head");
+        return nullptr;
+      }
+      const std::size_t row_bytes = std::size_t{out.cols} / 32 * 34;
+      auto* rows =
+          Alloc<std::uint8_t>(a, ids.size() * row_bytes + 256, error_msg);
+      auto* map = Alloc<std::int32_t>(a, ids.size(), error_msg);
+      if (rows == nullptr || map == nullptr ||
+          !Check(hipMemcpy(map, ids.data(), ids.size() * sizeof(std::int32_t),
+                           hipMemcpyHostToDevice),
+                 "draft vocabulary ids", error_msg)) {
+        return nullptr;
+      }
+      GatherRows(out.data, rows, map, static_cast<std::uint32_t>(ids.size()),
+                 row_bytes, e->stream_);
+      if (!Check(hipStreamSynchronize(e->stream_), "draft vocabulary rows",
+                 error_msg)) {
+        return nullptr;
+      }
+      e->draft_head_ = out;
+      e->draft_head_.data = rows;
+      e->draft_head_.rows = static_cast<std::uint32_t>(ids.size());
+      e->draft_ids_ = map;
+      std::fprintf(stderr,
+                   "qwen38_flash_next: draft vocabulary %zu of %u tokens "
+                   "(%.0f MB)\n",
+                   ids.size(), out.rows,
+                   static_cast<double>(ids.size() * row_bytes) / 1e6);
+    }
     if (!Check(hipHostMalloc(&e->mtp_token_host_, sizeof(std::int32_t),
                              ResultHostFlags()),
                "pinned draft token", error_msg) ||
@@ -2073,17 +2121,25 @@ bool Executor::CopyTrunkHidden(const Session& session, std::span<float> hidden,
 bool Executor::MtpHead(const DeviceMixer& head, const float* res, bool token,
                        bool candidates, std::int32_t* token_device,
                        std::int32_t* token_host, std::string* error_msg) const {
-  const DeviceTensor& output = model_->output();
+  const bool subset = draft_ids_ != nullptr;
+  const DeviceTensor& output = subset ? draft_head_ : model_->output();
   if (!HcMix(head, res, false, s_.mixed, nullptr, 1, error_msg) ||
       !Dense(output, s_.mixed, s_.logits, 1, error_msg)) {
     return false;
   }
-  if (candidates)
+  if (candidates) {
     MtpTopCandidates(s_.logits, s_.mtp_ids, s_.mtp_scratch_ids, s_.mtp_scores,
                      output.rows, stream_);
+    if (subset)
+      RemapIds(s_.mtp_ids, static_cast<std::uint32_t>(
+                   std::min<std::size_t>(output.rows, kMtpCandidates)),
+               draft_ids_, stream_);
+  }
   if (token) {
     auto* token_out = token_device != nullptr ? token_device : s_.mtp_token;
     Argmax(s_.logits, s_.mtp_argmax, token_out, 1, output.rows, stream_);
+    if (subset)
+      RemapIds(reinterpret_cast<std::uint32_t*>(token_out), 1, draft_ids_, stream_);
     if (token_host != nullptr &&
         !Check(hipMemcpyAsync(token_host, token_out, sizeof(std::int32_t),
                               hipMemcpyDeviceToHost, stream_),

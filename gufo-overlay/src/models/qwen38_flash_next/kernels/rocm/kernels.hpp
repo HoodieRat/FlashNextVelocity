@@ -118,6 +118,11 @@ bool HcCombineMoeF16(float* res, const __half* expert_out, const float* weights,
                      std::uint32_t n_tokens, std::uint32_t hidden,
                      std::uint32_t streams, float eps, hipStream_t stream);
 
+// Pinned Gufo draft-head subset copy and original-token remapping.
+void GatherRows(const void* src, void* dst, const std::int32_t* ids,
+                std::uint32_t rows, std::size_t row_bytes, hipStream_t stream);
+void RemapIds(std::uint32_t* ids, std::uint32_t count, const std::int32_t* map,
+              hipStream_t stream);
 /// x[i] = silu(x[i] * scale), in place over `count` floats.
 void SiluScale(float* x, float scale, std::size_t count, hipStream_t stream);
 /// gate[i] = silu(gate[i]) * up[i], in place in `gate`.

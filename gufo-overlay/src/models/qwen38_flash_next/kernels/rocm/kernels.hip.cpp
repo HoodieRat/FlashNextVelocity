@@ -5979,4 +5979,42 @@ void MtpTopVerificationCandidates256(const float* logits, std::uint32_t* ids,
       logits, ids, scratch_ids, scores, vocab, stream);
 }
 
+namespace {
+__global__ void GatherRowsKernel(const std::uint32_t* __restrict__ src,
+                                 std::uint32_t* __restrict__ dst,
+                                 const std::int32_t* __restrict__ ids,
+                                 std::size_t words) {
+  const std::size_t row = blockIdx.x;
+  const std::uint32_t* from = src + static_cast<std::size_t>(ids[row]) * words;
+  std::uint32_t* to = dst + row * words;
+  for (std::size_t w = threadIdx.x; w < words; w += blockDim.x) {
+    to[w] = from[w];
+  }
+}
+
+__global__ void RemapIdsKernel(std::uint32_t* ids, std::uint32_t count,
+                               const std::int32_t* map) {
+  const std::uint32_t i = threadIdx.x;
+  if (i < count) {
+    ids[i] = static_cast<std::uint32_t>(map[ids[i]]);
+  }
+}
+}  // namespace
+
+void GatherRows(const void* src, void* dst, const std::int32_t* ids,
+                std::uint32_t rows, std::size_t row_bytes, hipStream_t stream) {
+  if (rows == 0) {
+    return;
+  }
+  hipLaunchKernelGGL(GatherRowsKernel, dim3(rows), dim3(256), 0, stream,
+                     static_cast<const std::uint32_t*>(src),
+                     static_cast<std::uint32_t*>(dst), ids, row_bytes / 4);
+}
+
+void RemapIds(std::uint32_t* ids, std::uint32_t count, const std::int32_t* map,
+              hipStream_t stream) {
+  hipLaunchKernelGGL(RemapIdsKernel, dim3(1), dim3(256), 0, stream, ids, count,
+                     map);
+}
+
 }  // namespace gufo::models::qwen38_flash_next::rocm

@@ -33,6 +33,62 @@ void AssignError(std::string* error_msg, std::string_view message) {
   }
 }
 
+/// DraftVocabulary::kLatinText: special tokens, tokens whose bytes are
+/// printable ASCII (or tab / newline / carriage return), and tokens that are
+/// complete UTF-8 made of ASCII plus common typographic marks. Pieces of
+/// multi-byte characters (most CJK, Cyrillic, accented letters) are left out.
+std::vector<std::int32_t> LatinTextVocabulary(
+    const tokenization::QwenTokenizer& tokenizer) {
+  constexpr char32_t kTypographic[] = {
+      0x2014, 0x2013, 0x201C, 0x201D, 0x2018, 0x2019, 0x2026, 0x2022, 0x2192,
+      0x2190, 0x2248, 0x00D7, 0x00F7, 0x00B1, 0x00B0, 0x00B7, 0x00E9};
+  const auto ascii = [](unsigned char b) {
+    return (b >= 0x20 && b < 0x7F) || b == '\t' || b == '\n' || b == '\r';
+  };
+  std::vector<std::int32_t> ids;
+  for (std::size_t id = 0; id < tokenizer.GetVocabSize(); ++id) {
+    const auto token = static_cast<tokenization::TokenId>(id);
+    if (tokenizer.IsSpecialToken(token)) {
+      ids.push_back(static_cast<std::int32_t>(id));
+      continue;
+    }
+    const std::string text = tokenizer.DecodeTokenCopy(token);
+    bool keep = !text.empty();
+    for (std::size_t i = 0; keep && i < text.size();) {
+      const auto b = static_cast<unsigned char>(text[i]);
+      if (b < 0x80) {
+        keep = ascii(b);
+        ++i;
+        continue;
+      }
+      // A complete 2- or 3-byte UTF-8 sequence for an allowed mark.
+      const std::size_t length = (b & 0xE0) == 0xC0   ? 2
+                                 : (b & 0xF0) == 0xE0 ? 3
+                                                      : 0;
+      if (length == 0 || i + length > text.size()) {
+        keep = false;
+        break;
+      }
+      char32_t cp = length == 2 ? (b & 0x1F) : (b & 0x0F);
+      for (std::size_t j = 1; j < length; ++j) {
+        const auto c = static_cast<unsigned char>(text[i + j]);
+        if ((c & 0xC0) != 0x80) {
+          keep = false;
+          break;
+        }
+        cp = (cp << 6) | (c & 0x3F);
+      }
+      keep = keep && std::find(std::begin(kTypographic), std::end(kTypographic),
+                               cp) != std::end(kTypographic);
+      i += length;
+    }
+    if (keep) {
+      ids.push_back(static_cast<std::int32_t>(id));
+    }
+  }
+  return ids;
+}
+
 constexpr std::array<char, 8> kSessionSnapshotMagic{'Q', 'F', 'N', 'S',
                                                     'E', 'S', 'S', '1'};
 
@@ -158,6 +214,9 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
                 exec.max_batch, std::uint64_t{options.max_draft_tokens} + 1))
           : 1;
   exec.max_speculative = exec.max_logit_rows;
+  if (m->mtp_weights_ && options.draft_vocabulary == DraftVocabulary::kLatinText) {
+    exec.draft_vocab = LatinTextVocabulary(*m->tokenizer_);
+  }
   m->executor_ =
       rocm::Executor::Create(*m->device_, m->ngram_.get(), exec, error_msg);
   if (!m->executor_) {
@@ -205,6 +264,10 @@ std::int32_t Model::EosToken() const noexcept {
 bool Model::IsStopToken(std::int32_t token) const noexcept {
   return token == EosToken() ||
          token == static_cast<std::int32_t>(tokenizer_->GetPadTokenId());
+}
+
+std::uint32_t Model::DraftVocabSize() const noexcept {
+  return executor_->draft_vocab_size();
 }
 
 std::uint32_t Model::VocabSize() const noexcept {

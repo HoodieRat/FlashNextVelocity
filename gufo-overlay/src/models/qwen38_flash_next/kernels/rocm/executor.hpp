@@ -146,6 +146,7 @@ public:
     std::uint32_t max_logit_rows{1};
     /// Longest speculative batch; bounds the recurrent snapshot storage.
     std::uint32_t max_speculative{1};
+    std::vector<std::int32_t> draft_vocab;
   };
 
   ~Executor();
@@ -328,6 +329,9 @@ public:
     return options_.max_speculative;
   }
   [[nodiscard]] bool has_mtp() const noexcept { return model_->has_mtp(); }
+  [[nodiscard]] std::uint32_t draft_vocab_size() const noexcept {
+    return draft_ids_ != nullptr ? draft_head_.rows : config().vocab_size;
+  }
 
 private:
   Executor() = default;
@@ -601,6 +605,9 @@ private:
   // reuse while prior H2D copies are still queued on the nonblocking HIP stream.
   std::int32_t* mtp_chain_host_{nullptr};
   Session::Control* mtp_chain_controls_host_{nullptr};
+  // Draft-only copy of selected shared output rows and original token IDs.
+  DeviceTensor draft_head_{};
+  std::int32_t* draft_ids_{nullptr};
   MtpCandidateLogits* mtp_candidates_host_{nullptr};
   MtpVerificationCandidateLogits* mtp_verify_candidates_host_{nullptr};
   std::uint32_t* done_flag_{nullptr};
