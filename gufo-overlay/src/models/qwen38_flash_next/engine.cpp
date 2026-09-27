@@ -139,9 +139,13 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
   if (options.context_lookup &&
       (options.context_lookup_min_ngram < 2 ||
        options.context_lookup_max_ngram < options.context_lookup_min_ngram ||
-       options.context_lookup_max_ngram > 32 ||
-       options.context_lookup_min_draft == 0 ||
-       options.context_lookup_min_draft > kMaxMtpDraftTokens)) {
+       options.context_lookup_max_ngram > 32)) {
+    AssignError(error_msg, "context lookup settings are invalid");
+    return nullptr;
+  }
+  if (options.context_lookup_min_draft == 0 ||
+      options.context_lookup_max_draft > kMaxContextLookupDraftTokens ||
+      options.context_lookup_min_draft > options.context_lookup_max_draft) {
     AssignError(error_msg, "context lookup settings are invalid");
     return nullptr;
   }
@@ -152,6 +156,13 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
     return nullptr;
   }
   m->options_ = options;
+  m->options_.context_lookup_capacity = options.context_lookup_capacity == 0
+      ? options.context_lookup_max_draft : options.context_lookup_capacity;
+  if (m->options_.context_lookup_capacity < options.context_lookup_max_draft ||
+      m->options_.context_lookup_capacity > kMaxContextLookupDraftTokens) {
+    AssignError(error_msg, "lookup capacity must cover active width and be at most 16");
+    return nullptr;
+  }
   m->reader_ = core::GgufReader::OpenFile(model_path, error_msg);
   if (!m->reader_) {
     return nullptr;
@@ -208,11 +219,13 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
   }
   rocm::Executor::Options exec;
   exec.max_batch = m->PrefillCapacity();
-  exec.max_logit_rows =
-      m->mtp_weights_
-          ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
-                exec.max_batch, std::uint64_t{options.max_draft_tokens} + 1))
-          : 1;
+  const auto speculative_drafts =
+      options.context_lookup
+          ? std::max(options.max_draft_tokens, m->options_.context_lookup_capacity)
+          : options.max_draft_tokens;
+  exec.max_logit_rows = m->mtp_weights_
+                            ? std::min(exec.max_batch, speculative_drafts + 1)
+                            : 1;
   exec.max_speculative = exec.max_logit_rows;
   if (m->mtp_weights_ && options.draft_vocabulary == DraftVocabulary::kLatinText) {
     exec.draft_vocab = LatinTextVocabulary(*m->tokenizer_);
@@ -291,6 +304,10 @@ const Config& Model::config() const noexcept {
   return weights_->config;
 }
 
+std::size_t Model::TargetShardCount() const noexcept {
+  return reader_->GetMappedRegions().size();
+}
+
 std::size_t Model::ResidentBytes() const noexcept {
   return device_->resident_bytes() + (vision_ ? vision_->ResidentBytes() : 0);
 }
@@ -341,6 +358,20 @@ std::uint32_t Session::ContextSize() const noexcept {
 
 std::uint64_t Session::MtpFreshResets() const noexcept {
   return model_->executor_->MtpFreshResets();
+}
+
+bool Session::BeginLookupRequest(ContextLookupMode mode, std::string* error_msg) {
+  const auto required = mode == ContextLookupMode::kFixed6 ? 6U : 16U;
+  if (model_->options_.context_lookup_capacity < required) {
+    if (error_msg) *error_msg = "lookup policy exceeds loaded capacity";
+    return false;
+  }
+  lookup_policy_.Reset(mode);
+  lookup_request_base_ = Position();
+  if (!MtpEnabled() || !model_->options_.context_lookup) return true;
+  // Only storage is reserved: Run() and graph keys still use actual chain size.
+  return model_->executor_->EnsureRollback(
+      *session_, model_->executor_->max_speculative() - 1, error_msg);
 }
 
 void Session::Reset() {
@@ -850,7 +881,8 @@ bool Session::PrepareDecode(const DecodeRequest& request,
   // distribution and the same p/q rejection+residual verifier as MTP,
   // preserving target sampling.
   const auto lookup_budget =
-      cap > 1 ? std::min<std::size_t>(model_->options_.max_draft_tokens, cap - 1)
+      cap > 1 ? std::min<std::size_t>(lookup_policy_.active_width,
+                                      cap - 1)
               : 0;
   if (!defer_head && model_->options_.context_lookup &&
       lookup_budget >= model_->options_.context_lookup_min_draft) {
@@ -1080,7 +1112,7 @@ bool Session::FinishDecode(const DecodeRequest& request,
     return true;
   }
   sampler.Accept(static_cast<sampling::TokenId>(anchor));
-  std::array<rocm::ArgmaxCandidate, kMaxMtpDraftTokens> greedy{};
+  std::array<rocm::ArgmaxCandidate, kMaxContextLookupDraftTokens> greedy{};
   std::uint32_t keep = 1;
   std::optional<std::int32_t> correction;
   {
@@ -1237,6 +1269,7 @@ bool Session::FinishDecode(const DecodeRequest& request,
   stats_.drafted += k - 1;
   stats_.accepted += keep - 1;
   if (pending.lookup) {
+    lookup_policy_.Observe(k - 1, keep - 1, base + keep - lookup_request_base_);
     ++stats_.lookup_cycles;
     stats_.lookup_drafted += k - 1;
     stats_.lookup_accepted += keep - 1;

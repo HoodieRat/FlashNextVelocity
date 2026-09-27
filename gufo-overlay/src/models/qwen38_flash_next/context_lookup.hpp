@@ -10,6 +10,42 @@
 
 namespace gufo::models::qwen38_flash_next {
 
+enum class ContextLookupMode { kFixed6, kFixed16, kSticky };
+
+/// Request-local evidence from completed lookup rounds only. MTP never updates
+/// this learner. Transition indices are one-based completed tokens/lookup rounds.
+struct ContextLookupPolicy {
+  ContextLookupMode mode{ContextLookupMode::kFixed6};
+  std::uint32_t starting_width{6}, active_width{6};
+  std::uint32_t strong{0}, promotions{0};
+  std::uint64_t rounds[2]{}, proposed[2]{}, accepted[2]{}, capped[2]{};
+  std::uint64_t promotion_token{0}, promotion_round{0};
+
+  void Reset(ContextLookupMode requested) noexcept {
+    *this = ContextLookupPolicy{};
+    mode = requested;
+    starting_width = active_width = mode == ContextLookupMode::kFixed16 ? 16 : 6;
+  }
+  void Observe(std::uint32_t drafted, std::uint32_t kept,
+               std::uint64_t output_tokens) noexcept {
+    const unsigned bucket = active_width == 16 ? 1 : 0;
+    ++rounds[bucket];
+    proposed[bucket] += drafted;
+    accepted[bucket] += kept;
+    capped[bucket] += drafted == active_width;
+    // Promotion is sticky until the next request. Weak wide spans do not
+    // change width or feed any additional learner.
+    if (mode != ContextLookupMode::kSticky || promotions) return;
+    strong = drafted == 6 && kept >= 5 ? strong + 1 : 0;
+    if (strong == 2) {
+      active_width = 16;
+      ++promotions;
+      promotion_token = output_tokens;
+      promotion_round = rounds[0] + rounds[1];
+    }
+  }
+};
+
 struct ContextLookupMatch {
   std::vector<std::int32_t> continuation;
   std::uint32_t ngram{0};

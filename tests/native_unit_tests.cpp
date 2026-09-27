@@ -159,8 +159,50 @@ static void TestProposalSourceTelemetry() {
         "profiling reset left source depth counters dirty");
 }
 
+static void TestLookupPolicy() {
+  qfn::ContextLookupPolicy p;
+  p.Reset(qfn::ContextLookupMode::kSticky);
+  p.Observe(6, 5, 6);
+  p.Observe(5, 5, 12);
+  p.Observe(6, 6, 19);
+  Check(p.active_width == 6, "uncapped proposal supplied promotion evidence");
+  p.Observe(6, 4, 24);
+  p.Observe(6, 5, 30);
+  Check(p.active_width == 6, "weak sample did not reset promotion evidence");
+  p.Observe(6, 5, 36);
+  Check(p.active_width == 16 && p.promotions == 1 && p.promotion_round == 6 &&
+        p.promotion_token == 36, "two capped 5/6 samples did not promote");
+  p.Observe(16, 4, 41);
+  p.Observe(16, 0, 42);
+  p.Observe(16, 7, 50);
+  p.Observe(16, 5, 56);
+  p.Observe(5, 0, 57);
+  Check(p.active_width == 16 && p.promotions == 1 && p.promotion_token == 36,
+        "weak wide spans changed sticky promotion");
+  Check(p.rounds[0] == 6 && p.rounds[1] == 5 && p.capped[0] == 5 &&
+        p.capped[1] == 4 && p.proposed[1] == 69 && p.accepted[1] == 16,
+        "lookup width telemetry is wrong");
+  p.Reset(qfn::ContextLookupMode::kSticky);
+  Check(p.active_width == 6 && p.starting_width == 6 && !p.rounds[0] &&
+        !p.rounds[1] && !p.promotions && !p.strong && !p.promotion_token,
+        "request reset inherited sticky evidence");
+  p.Observe(6, 6, 7);
+  Check(p.active_width == 6, "request reset inherited promotion streak");
+  p.Observe(6, 6, 14);
+  Check(p.active_width == 16 && p.promotion_round == 2,
+        "next request could not independently promote");
+  for (auto mode : {qfn::ContextLookupMode::kFixed6, qfn::ContextLookupMode::kFixed16}) {
+    p.Reset(mode);
+    for (unsigned i = 0; i < 4; ++i) p.Observe(p.active_width, 6, i * 7);
+    p.Observe(p.active_width, 0, 29);
+    Check(p.active_width == p.starting_width && !p.promotions,
+          "fixed policy changed width");
+  }
+}
+
 int main() {
   try {
+    TestLookupPolicy();
     TestContextLookup();
     TestHaloGreedyProposal();
     TestDeferredFrontierTelemetry();

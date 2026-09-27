@@ -18,7 +18,8 @@ namespace gufo::models::qwen38_flash_next::rocm {
 /// Stable per-prefix rollback addresses. Growing the depth does not move
 /// existing buffers or invalidate graphs captured for a smaller batch.
 struct RollbackRows {
-  float* rows[7]{};
+  // One snapshot per possible lookup draft; MTP itself remains capped at seven.
+  float* rows[16]{};
 };
 
 // Recurrent rollback keeps the state after the first token, then exact

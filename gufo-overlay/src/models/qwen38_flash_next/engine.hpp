@@ -27,6 +27,8 @@ class GgufReader;
 
 namespace gufo::models::qwen38_flash_next {
 
+inline constexpr std::uint32_t kMaxContextLookupDraftTokens = 16;
+
 struct ModelWeights;
 struct MtpWeights;
 class NgramTable;
@@ -70,7 +72,10 @@ struct ModelOptions {
   std::uint32_t context_lookup_min_ngram = 3;
   std::uint32_t context_lookup_max_ngram = 6;
   std::uint32_t context_lookup_window = 32768;
-  std::uint32_t context_lookup_min_draft = 2;
+  std::uint32_t context_lookup_min_draft = 6;
+  std::uint32_t context_lookup_max_draft = 16;
+  /// Zero uses the active maximum. Storage capacity does not set batch width.
+  std::uint32_t context_lookup_capacity = 0;
 };
 
 class Session;
@@ -113,6 +118,7 @@ public:
     return *tokenizer_;
   }
   [[nodiscard]] std::size_t ResidentBytes() const noexcept;
+  [[nodiscard]] std::size_t TargetShardCount() const noexcept;
   /// Worst-case private device state, including the configured rollback cap.
   [[nodiscard]] std::size_t SessionBytes(core::SessionMode mode,
                                          std::uint32_t context) const noexcept;
@@ -216,6 +222,11 @@ public:
   void ConfigureVision(std::shared_ptr<const qwen::vision::Prompt> prompt);
   /// A new request reusing cached context starts its own acceptance history.
   void ResetDraftPolicy() noexcept { draft_length_.Reset(); }
+  /// Reserve lookup verification storage after Sync, outside the decode loop.
+  [[nodiscard]] bool BeginLookupRequest(ContextLookupMode mode, std::string* error_msg);
+  [[nodiscard]] const ContextLookupPolicy& LookupPolicy() const noexcept {
+    return lookup_policy_;
+  }
   /// Sampled MTP stops extending a chain when a proposal falls below this
   /// probability. 0 keeps the previous behavior. Greedy drafts ignore it.
   void SetDraftConfidence(float minimum) noexcept {
@@ -304,6 +315,8 @@ private:
   std::vector<float> verify_logits_;
   std::uint32_t hidden_base_{0};  ///< first position whose hidden row is kept
   MtpLengthController draft_length_;
+  ContextLookupPolicy lookup_policy_;
+  std::uint32_t lookup_request_base_{0};
   float draft_confidence_{0.0F};
   SpeculativeStats stats_;
   // Performance-only cache of the raw Top-64/128/256 from the current target

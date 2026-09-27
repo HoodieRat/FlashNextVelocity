@@ -17,7 +17,7 @@
 namespace fnvprof {
 
 inline constexpr std::uint64_t kProfileGraphBit = std::uint64_t{1} << 36;
-inline constexpr int kDepths = 8;
+inline constexpr int kDepths = 17;
 inline constexpr int kStageCount = 9;
 
 enum class Phase : int { Off = 0, Prefill = 1, Decode = 2 };

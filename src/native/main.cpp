@@ -48,6 +48,21 @@
 namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 using qfn = gufo::models::qwen38_flash_next::Model;
+using LookupMode = gufo::models::qwen38_flash_next::ContextLookupMode;
+using LookupPolicy = gufo::models::qwen38_flash_next::ContextLookupPolicy;
+std::atomic<std::uint64_t> target_load_count{0}, mtp_load_count{0};
+
+LookupMode ParseLookupMode(std::string_view name) {
+  if (name == "fixed6") return LookupMode::kFixed6;
+  if (name == "fixed16") return LookupMode::kFixed16;
+  if (name == "sticky") return LookupMode::kSticky;
+  throw std::invalid_argument("context_lookup_policy must be fixed6, fixed16, or sticky");
+}
+const char* LookupModeName(LookupMode mode) {
+  if (mode == LookupMode::kFixed6) return "fixed6";
+  if (mode == LookupMode::kFixed16) return "fixed16";
+  return "sticky";
+}
 using QfnSession = gufo::models::qwen38_flash_next::Session;
 using gufo::json::Value;
 
@@ -71,7 +86,10 @@ struct Config {
   std::uint32_t context_lookup_min_ngram{3};
   std::uint32_t context_lookup_max_ngram{6};
   std::uint32_t context_lookup_window{32768};
-  std::uint32_t context_lookup_min_draft{2};
+  std::uint32_t context_lookup_min_draft{6};
+  std::uint32_t context_lookup_max_draft{16};
+  std::uint32_t context_lookup_capacity{16};
+  std::string context_lookup_policy{"sticky"};
   bool memory_guard{true};
   double memory_guard_min_available_gib{8.0};
   std::uint32_t sessions{1};
@@ -94,6 +112,8 @@ struct Config {
 };
 
 struct Metrics {
+  LookupPolicy lookup_policy{};
+  std::uint32_t lookup_capacity{0};
   std::uint64_t prompt_tokens{0};
   std::uint64_t completion_tokens{0};
   double prefill_ms{0};
@@ -262,6 +282,15 @@ Config LoadConfig(const fs::path& path) {
   c.context_lookup_max_ngram = static_cast<std::uint32_t>(root.member_size("context_lookup_max_ngram", c.context_lookup_max_ngram));
   c.context_lookup_window = static_cast<std::uint32_t>(root.member_size("context_lookup_window", c.context_lookup_window));
   c.context_lookup_min_draft = static_cast<std::uint32_t>(root.member_size("context_lookup_min_draft", c.context_lookup_min_draft));
+  c.context_lookup_max_draft = static_cast<std::uint32_t>(root.member_size("context_lookup_max_draft", c.context_lookup_max_draft));
+  c.context_lookup_policy = root.member_str("context_lookup_policy", c.context_lookup_policy);
+  const auto lookup_mode = ParseLookupMode(c.context_lookup_policy);
+  c.context_lookup_capacity = static_cast<std::uint32_t>(root.member_size(
+      "context_lookup_capacity", c.context_lookup_capacity));
+  if (c.context_lookup_capacity < (lookup_mode == LookupMode::kFixed6 ? 6U : 16U))
+    throw std::runtime_error("context_lookup_policy exceeds hard capacity");
+  if (c.context_lookup_capacity < c.context_lookup_max_draft || c.context_lookup_capacity > 16)
+    throw std::runtime_error("context_lookup_capacity must cover active width and be at most 16");
   if (const auto* v = root.find("memory_guard"); v && v->is_bool()) c.memory_guard = v->as_bool();
   c.memory_guard_min_available_gib = root.member_double("memory_guard_min_available_gib", c.memory_guard_min_available_gib);
   c.sessions = static_cast<std::uint32_t>(root.member_size("sessions", c.sessions));
@@ -300,8 +329,12 @@ Config LoadConfig(const fs::path& path) {
   if (c.context_lookup &&
       (c.context_lookup_min_ngram < 2 ||
        c.context_lookup_max_ngram < c.context_lookup_min_ngram ||
-       c.context_lookup_max_ngram > 32 || c.context_lookup_min_draft == 0 ||
-       c.context_lookup_min_draft > gufo::models::qwen38_flash_next::kMaxMtpDraftTokens))
+       c.context_lookup_max_ngram > 32))
+    throw std::runtime_error("context lookup settings are invalid");
+  if (c.context_lookup_min_draft == 0 ||
+      c.context_lookup_max_draft >
+          gufo::models::qwen38_flash_next::kMaxContextLookupDraftTokens ||
+      c.context_lookup_min_draft > c.context_lookup_max_draft)
     throw std::runtime_error("context lookup settings are invalid");
   if (!std::isfinite(c.memory_guard_min_available_gib) ||
       c.memory_guard_min_available_gib < 0.0 ||
@@ -913,6 +946,32 @@ std::string FormatLastRequest(const Metrics& m) {
   return o.str();
 }
 
+Value LookupPolicyJson(const Metrics& m) {
+  const auto& p = m.lookup_policy;
+  Value v = Value::object();
+  v["mode"] = LookupModeName(p.mode);
+  v["hard_capacity"] = static_cast<unsigned long long>(m.lookup_capacity);
+  v["starting_width"] = static_cast<unsigned long long>(p.starting_width);
+  v["final_width"] = static_cast<unsigned long long>(p.active_width);
+  v["promotions"] = static_cast<unsigned long long>(p.promotions);
+  v["promoted"] = p.promotions != 0;
+  v["promotion_token_index"] = static_cast<unsigned long long>(p.promotion_token);
+  v["promotion_lookup_round_index"] = static_cast<unsigned long long>(p.promotion_round);
+  for (unsigned i = 0; i < 2; ++i) {
+    Value width = Value::object();
+    width["rounds"] = static_cast<unsigned long long>(p.rounds[i]);
+    width["proposed"] = static_cast<unsigned long long>(p.proposed[i]);
+    width["accepted"] = static_cast<unsigned long long>(p.accepted[i]);
+    width["capped"] = static_cast<unsigned long long>(p.capped[i]);
+    width["accepted_per_output"] = m.completion_tokens
+        ? double(p.accepted[i]) / m.completion_tokens : 0.0;
+    v[i == 0 ? "width6" : "width16"] = width;
+  }
+  v["accepted_per_output"] = m.completion_tokens
+      ? double(p.accepted[0] + p.accepted[1]) / m.completion_tokens : 0.0;
+  return v;
+}
+
 Value MetricsJson(const Metrics& m) {
   Value v = Value::object();
   v["prompt_tokens"] = static_cast<unsigned long long>(m.prompt_tokens);
@@ -947,6 +1006,7 @@ Value MetricsJson(const Metrics& m) {
   v["mtp_avg_proposal_confidence"] = m.mtp_avg_proposal_confidence;
   v["lookup_cycles"] = static_cast<unsigned long long>(m.lookup_cycles);
   v["lookup_draft_tokens"] = static_cast<unsigned long long>(m.lookup_drafted);
+  v["lookup_policy"] = LookupPolicyJson(m);
   v["lookup_draft_tokens_accepted"] = static_cast<unsigned long long>(m.lookup_accepted);
   v["lookup_acceptance"] = m.lookup_drafted ? static_cast<double>(m.lookup_accepted) / static_cast<double>(m.lookup_drafted) : 0.0;
   v["lookup_avg_ngram"] = m.lookup_avg_ngram;
@@ -1255,10 +1315,14 @@ class Runtime {
     options.context_lookup_max_ngram = cfg_.context_lookup_max_ngram;
     options.context_lookup_window = cfg_.context_lookup_window;
     options.context_lookup_min_draft = cfg_.context_lookup_min_draft;
+    options.context_lookup_max_draft = cfg_.context_lookup_max_draft;
+    options.context_lookup_capacity = cfg_.context_lookup_capacity;
     std::string error;
     const auto start = Clock::now();
     model_ = qfn::Load(cfg_.model, options, &error);
     if (!model_) throw std::runtime_error("model load failed: " + error);
+    ++target_load_count;
+    if (model_->HasMtp()) ++mtp_load_count;
     const auto mode = model_->HasMtp() ? gufo::core::SessionMode::kSpeculative
                                        : gufo::core::SessionMode::kAutoregressive;
     session_ = model_->CreateSession(mode, cfg_.context, &error);
@@ -1276,6 +1340,13 @@ class Runtime {
   std::shared_ptr<qfn> model() const noexcept { return model_; }
   Metrics last_metrics() const { std::lock_guard lock(metrics_mutex_); return last_; }
   double load_seconds() const noexcept { return load_seconds_; }
+  const std::string& instance_id() const noexcept { return instance_id_; }
+  LookupMode LookupRequestMode(const Value& body) const {
+    const auto mode = ParseLookupMode(body.member_str("context_lookup_policy", cfg_.context_lookup_policy));
+    if (cfg_.context_lookup_capacity < (mode == LookupMode::kFixed6 ? 6U : 16U))
+      throw std::invalid_argument("request lookup policy exceeds loaded capacity");
+    return mode;
+  }
 
   struct Result {
     std::string raw;
@@ -1290,7 +1361,8 @@ class Runtime {
                   bool profile = false,
                   bool thinking = false,
                   bool preserve_thinking = false,
-                  std::string_view reasoning_effort = "OFF") {
+                  std::string_view reasoning_effort = "OFF",
+                  LookupMode lookup_mode = LookupMode::kSticky) {
     struct ProfileGuard {
       bool on{false};
       explicit ProfileGuard(bool enable) : on(enable) {
@@ -1321,6 +1393,8 @@ class Runtime {
     const auto prefill0 = Clock::now();
     std::string error;
     if (!session_->Sync(prompt, &error)) throw std::runtime_error("prefill failed: " + error);
+    if (!session_->BeginLookupRequest(lookup_mode, &error))
+      throw std::runtime_error("lookup capacity reservation failed: " + error);
     const auto prefill1 = Clock::now();
     const auto context_capacity = session_->ContextSize();
     const auto context_depth = session_->Position();
@@ -1454,6 +1528,8 @@ class Runtime {
     const auto mtp_conf_samples = stats1.mtp_confidence_samples - stats0.mtp_confidence_samples;
     const auto mtp_conf_sum = stats1.mtp_confidence_sum - stats0.mtp_confidence_sum;
     m.mtp_avg_proposal_confidence = mtp_conf_samples ? mtp_conf_sum / static_cast<double>(mtp_conf_samples) : 0.0;
+    m.lookup_policy = session_->LookupPolicy();
+    m.lookup_capacity = cfg_.context_lookup_capacity;
     m.lookup_cycles = stats1.lookup_cycles - stats0.lookup_cycles;
     m.lookup_drafted = stats1.lookup_drafted - stats0.lookup_drafted;
     m.lookup_accepted = stats1.lookup_accepted - stats0.lookup_accepted;
@@ -1506,6 +1582,7 @@ class Runtime {
     }
   }
 
+  const std::string instance_id_{RandomId("engine_")};
   Config cfg_;
   std::shared_ptr<qfn> model_;
   std::unique_ptr<QfnSession> session_;
@@ -1653,6 +1730,7 @@ std::shared_ptr<const gufo::models::qwen::vision::Prompt> PrepareChatPrompt(
 }
 
 void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
+  const auto lookup_mode = runtime.LookupRequestMode(body);
   const auto chat = ParseChat(body, runtime.cfg());
   const auto sampling = ParseSampling(body, runtime.cfg());
   const auto max_tokens = MaxTokens(body, runtime.cfg());
@@ -1678,7 +1756,7 @@ void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
         Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; Value d = Value::object(); d["content"] = std::string(text); c["delta"] = d; c["finish_reason"] = Value(); cs.push_back(c); chunk["choices"] = cs; Sse(client, chunk);
       }, profile, chat.enable_thinking,
       chat.enable_thinking && chat.preserve_thinking,
-      EffortName(chat.reasoning_effort));
+      EffortName(chat.reasoning_effort), lookup_mode);
     Value end = Value::object(); end["id"] = id; end["object"] = "chat.completion.chunk"; end["model"] = runtime.model()->ModelName();
     Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; c["delta"] = Value::object(); c["finish_reason"] = "stop"; cs.push_back(c); end["choices"] = cs;
     if (include_usage) end["usage"] = UsageJson(result.metrics);
@@ -1692,7 +1770,7 @@ void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
   const auto result = runtime.Generate(
       prompt, vision, sampling, max_tokens, {}, profile, chat.enable_thinking,
       chat.enable_thinking && chat.preserve_thinking,
-      EffortName(chat.reasoning_effort));
+      EffortName(chat.reasoning_effort), lookup_mode);
   const auto parsed = ParseOutput(result.raw, chat.enable_thinking, !chat.tools.empty());
   if (chat.tool_required && parsed.calls.empty())
     throw std::runtime_error("tool_choice=required but the model did not produce a tool call");
@@ -1735,13 +1813,15 @@ void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
 }
 
 void HandleCompletion(SOCKET client, Runtime& runtime, const Value& body) {
+  const auto lookup_mode = runtime.LookupRequestMode(body);
   const auto prompt = body.member_str("prompt");
   if (prompt.empty()) throw std::invalid_argument("prompt must be a non-empty string");
   const auto sampling = ParseSampling(body, runtime.cfg());
   const auto max_tokens = MaxTokens(body, runtime.cfg());
   auto tokens = runtime.model()->Tokenize(prompt);
   const bool profile = body.find("flashnext_profile") && body.find("flashnext_profile")->is_bool() && body.find("flashnext_profile")->as_bool();
-  const auto result = runtime.Generate(tokens, nullptr, sampling, max_tokens, {}, profile);
+  const auto result = runtime.Generate(tokens, nullptr, sampling, max_tokens, {}, profile,
+                                       false, false, "OFF", lookup_mode);
   Value root = Value::object(); root["id"] = RandomId("cmpl-"); root["object"] = "text_completion"; root["model"] = runtime.model()->ModelName();
   Value choices = Value::array(); Value c = Value::object(); c["index"] = 0; c["text"] = result.raw; c["finish_reason"] = "stop"; choices.push_back(c); root["choices"] = choices; root["usage"] = UsageJson(result.metrics);
   SendResponse(client, {200, "application/json", root.dump()});
@@ -1802,6 +1882,12 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       v["mtp_draft_vocab_size"] = static_cast<unsigned long long>(runtime.model()->DraftVocabSize());
       v["vision"] = static_cast<bool>(runtime.model()->VisionEncoder());
       v["load_seconds"] = runtime.load_seconds();
+      v["server_pid"] = static_cast<unsigned long long>(GetCurrentProcessId());
+      v["engine_instance"] = runtime.instance_id();
+      v["target_model_load_count"] = static_cast<unsigned long long>(target_load_count.load());
+      v["mtp_model_load_count"] = static_cast<unsigned long long>(mtp_load_count.load());
+      v["target_shards"] = static_cast<unsigned long long>(runtime.model()->TargetShardCount());
+      v["context_lookup_policy"] = runtime.cfg().context_lookup_policy;
       // Expose the exact startup configuration so the Studio can verify that
       // Save/Restart launched the engine from the same dist\config.json the UI
       // just persisted. These are local-only diagnostics, not request overrides.
@@ -1825,6 +1911,8 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       v["context_lookup_max_ngram"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_max_ngram);
       v["context_lookup_window"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_window);
       v["context_lookup_min_draft"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_min_draft);
+      v["context_lookup_max_draft"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_max_draft);
+      v["context_lookup_capacity"] = static_cast<unsigned long long>(runtime.cfg().context_lookup_capacity);
       v["memory_guard"] = runtime.cfg().memory_guard;
       v["memory_guard_min_available_gib"] = runtime.cfg().memory_guard_min_available_gib;
       const auto memory = QueryWindowsMemoryHeadroom();
