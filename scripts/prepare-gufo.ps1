@@ -46,34 +46,6 @@ Replace-One $p '  if (addr == MAP_FAILED) {' '  if (addr == nullptr) {'
 Replace-One $p '  (void)madvise(addr, size, MADV_SEQUENTIAL);' '  gufo::win::Prefetch(addr, size);'
 Replace-All $p 'close(fd);' 'gufo::win::Close(fd);'
 
-# PLE direct positional I/O.
-$p=Join-Path $GufoRoot 'src\models\qwen38_flash_next\ngram.cpp'
-Replace-One $p @'
-#include <fcntl.h>
-#include <unistd.h>
-'@ @'
-#include "win_file.hpp"
-'@
-Replace-All $p '::close(fd_)' 'gufo::win::Close(fd_)'
-Replace-One $p @'
-  // Direct I/O bypasses the page cache; the mapping used for the rest of the
-  // model must not be used here or every touched row would stay resident.
-  const auto path = "/proc/self/fd/" + std::to_string(file_descriptor);
-  t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT);
-  t->direct_ = t->fd_ >= 0;
-  if (t->fd_ < 0) {
-    t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-  }
-'@ @'
-  // Windows equivalent of O_DIRECT + pread.
-  t->fd_ = gufo::win::OpenDirectFromFd(file_descriptor);
-  t->direct_ = t->fd_ >= 0;
-  if (t->fd_ < 0) {
-    t->fd_ = gufo::win::DuplicateFd(file_descriptor);
-  }
-'@
-Replace-One $p '    const ssize_t n = ::pread(fd_, base + got, length - got, begin + got);' '    const std::int64_t n = gufo::win::PRead(fd_, base + got, length - got, begin + got);'
-
 # Parallel weight upload file I/O.
 $p=Join-Path $GufoRoot 'src\core\hip\weight_upload.cpp'
 Replace-One $p @'
@@ -122,40 +94,6 @@ Replace-One $p @'
 '@
 Replace-One $p '      if (!read && errno != EINVAL && errno != EOPNOTSUPP) {' '      if (!read && errno != EINVAL) {'
 
-# Linux-only snapshot huge-page advice is optional; remove it on Windows.
-$p=Join-Path $GufoRoot 'src\models\qwen38_flash_next\engine.cpp'
-Replace-One $p @'
-#include <sys/mman.h>
-#include <unistd.h>
-
-'@ ''
-Replace-One $p @'
-SessionSnapshot::SessionSnapshot(std::uint64_t size)
-    : data_(new std::uint8_t[size]), size_(size) {
-  // Snapshot copies first-touch hundreds of MiB. Let Linux back the interior
-  // with transparent huge pages instead of faulting one 4 KiB page at a time.
-  // Advise only complete pages belonging to this allocation; this is optional
-  // and does not pin memory or change the serialized payload.
-  const long page = sysconf(_SC_PAGESIZE);
-  if (page > 0) {
-    const auto address = reinterpret_cast<std::uintptr_t>(data_.get());
-    const auto skip = (page - address % page) % page;
-    if (size > skip) {
-      const auto length = (size - skip) / page * page;
-      if (length != 0)
-        (void)madvise(data_.get() + skip, length, MADV_HUGEPAGE);
-    }
-  }
-}
-'@ @'
-SessionSnapshot::SessionSnapshot(std::uint64_t size)
-    : data_(new std::uint8_t[size]), size_(size) {}
-'@
-
-# LLP64: size_t and unsigned long long are the same type here.
-$p=Join-Path $GufoRoot 'src\core\json.hpp'
-Replace-One $p '  Value(std::size_t v) : type_(Type::kNumber), num_(static_cast<double>(v)) {}' ''
-
 # Winsock image URL safety path.
 $p=Join-Path $GufoRoot 'src\core\image.cpp'
 Replace-One $p @'
@@ -177,72 +115,6 @@ Replace-One $p @'
 '@ @'
         return ::socket(endpoint->family, endpoint->socktype,
                         endpoint->protocol);
-'@
-
-# Windows hipBLASLt may not expose a zero-workspace plan for every prompt
-# projection. Cache unsupported shapes so we do not rerun the failed planner
-# at every layer/request, then let the executor use hipBLAS for those shapes.
-$p=Join-Path $GufoRoot 'src\models\qwen38_flash_next\kernels\rocm\blaslt.hpp'
-Replace-One $p '#include <memory>' @'
-#include <memory>
-#include <set>
-'@
-Replace-One $p @'
-  hipblasLtHandle_t handle_{nullptr};
-  hipStream_t stream_{nullptr};
-  std::map<std::array<int, 4>, std::unique_ptr<Plan>> plans_;
-'@ @'
-  hipblasLtHandle_t handle_{nullptr};
-  hipStream_t stream_{nullptr};
-  std::map<std::array<int, 4>, std::unique_ptr<Plan>> plans_;
-  std::set<std::array<int, 4>> unsupported_;
-'@
-$p=Join-Path $GufoRoot 'src\models\qwen38_flash_next\kernels\rocm\blaslt.cpp'
-Replace-One $p @'
-  const std::array<int, 4> key{static_cast<int>(type), m, n, k};
-  auto& p = plans_[key];
-  if (!p) {
-    p = MakePlan(type, m, n, k, error);
-    if (!p) {
-      return false;
-    }
-  }
-'@ @'
-  const std::array<int, 4> key{static_cast<int>(type), m, n, k};
-  if (unsupported_.contains(key)) {
-    AssignError(error, "hipBLASLt shape cached as unsupported");
-    return false;
-  }
-  auto& p = plans_[key];
-  if (!p) {
-    p = MakePlan(type, m, n, k, error);
-    if (!p) {
-      unsupported_.insert(key);
-      return false;
-    }
-  }
-'@
-
-# Preserve the original fast path, but fall back to hipBLAS for only the
-# unsupported shape instead of aborting the request.
-$p=Join-Path $GufoRoot 'src\models\qwen38_flash_next\kernels\rocm\executor.cpp'
-Replace-One $p @'
-  return blaslt_->Gemm(w.data, s_.x_half, out, type, m, n, k, error_msg);
-'@ @'
-  if (blaslt_->Gemm(w.data, s_.x_half, out, type, m, n, k, error_msg)) {
-    return true;
-  }
-  const float alpha = 1.0F;
-  const float beta = 0.0F;
-  if (hipblasGemmEx(blas_, HIPBLAS_OP_T, HIPBLAS_OP_N, m, n, k, &alpha,
-                    w.data, type, k, s_.x_half, type, k, &beta, out,
-                    HIP_R_32F, m, HIPBLAS_COMPUTE_32F,
-                    HIPBLAS_GEMM_DEFAULT) == HIPBLAS_STATUS_SUCCESS) {
-    if (error_msg != nullptr) error_msg->clear();
-    return true;
-  }
-  AssignError(error_msg, "hipBLASLt and hipBLAS prefill GEMM failed");
-  return false;
 '@
 
 # Standard F16 Qwen mmproj support. Gufo's working kernels stay BF16/F32; the

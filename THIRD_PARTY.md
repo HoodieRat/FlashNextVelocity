@@ -2,13 +2,13 @@
 
 ## Gufo
 
-Source: https://github.com/gufo-org/gufo
+Source: https://github.com/pixmaate/gufo (`windows-port`)
 
-Pinned revision: `9cad13974cf6da0cd3674b4e0a88b14b7e4a2908`
+Pinned revision: `cff564964e8506c0abb3e530cecb55332187ac6c` (integrated 2026-09-26)
 
-License: MIT. The bootstrap retains Gufo's `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, and `licenses/` files in `.deps/gufo`.
+License: MIT. The production build keeps the pinned Gufo checkout, including its license files, in the external `%LOCALAPPDATA%\FlashNextVelocity` source cache. The prior `.deps/gufo` checkout is preserved separately.
 
-FlashNextVelocity uses Gufo's Qwen3.8 Flash-Next engine, MTP policy, Qwen tokenizer/template/vision path, HIP kernels, and MMQ-derived kernel package. Project-owned integration adds Windows platform I/O/mapping/network support plus sampled-MTP verification, profiling, and native context-lookup proposal logic on top of the pinned Gufo base.
+FlashNextVelocity uses Gufo's Qwen3.8 Flash-Next engine, MTP policy, Qwen tokenizer/template/vision path, HIP kernels, and MMQ-derived kernel package. Project-owned I/O, sampled-MTP verification, profiling, and native context-lookup proposal logic remain layered above this pinned Windows base.
 
 ## AMD ROCm / TheRock
 

@@ -16,10 +16,21 @@ if(NOT CMAKE_HIP_ARCHITECTURES STREQUAL "gfx1151")
   message(FATAL_ERROR "This build is intentionally pinned to gfx1151")
 endif()
 
-set(GUFO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.deps/gufo" CACHE PATH "Pinned Gufo checkout")
+set(GUFO_ROOT "" CACHE PATH "Pinned Gufo Windows checkout supplied by scripts/build.ps1")
 if(NOT EXISTS "${GUFO_ROOT}/src/models/qwen38_flash_next/engine.cpp")
   message(FATAL_ERROR "Pinned Gufo source is missing. Run BUILD.bat.")
 endif()
+
+# Use the pinned Windows port's POSIX bridge while retaining FlashNextVelocity's
+# own native runtime and model-specific Windows file handling.
+include_directories(BEFORE ${GUFO_ROOT}/compat/win32/include)
+set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -I${GUFO_ROOT}/compat/win32/hip_include")
+add_compile_definitions(_CRT_DECLARE_NONSTDC_NAMES=0 _CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES)
+add_link_options(LINKER:/STACK:8388608)
+add_library(gufo_posix_compat STATIC
+  ${GUFO_ROOT}/compat/win32/posix.cpp
+  ${GUFO_ROOT}/compat/win32/spawn.cpp)
+target_link_libraries(gufo_posix_compat PUBLIC ws2_32 psapi)
 
 find_package(Threads REQUIRED)
 find_package(ICU REQUIRED COMPONENTS uc i18n)
@@ -80,7 +91,8 @@ target_compile_options(fnv_core PRIVATE
   $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
 target_link_libraries(fnv_core PUBLIC
   Threads::Threads ICU::uc ICU::i18n OpenSSL::Crypto PNG::PNG JPEG::JPEG
-  CURL::libcurl hip::host roc::hipblas roc::hipblaslt roc::rocblas ws2_32 bcrypt)
+  CURL::libcurl hip::host roc::hipblas roc::hipblaslt roc::rocblas
+  gufo_posix_compat ws2_32 bcrypt)
 
 # Gufo's qwen38_flash_next CMakeLists links a target named gufo_core.
 # Expose our Windows core implementation under that expected target name so

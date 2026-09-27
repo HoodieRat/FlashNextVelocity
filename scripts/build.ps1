@@ -2,11 +2,11 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if($Root.Length -gt 100){throw "Project path is too long for a reliable ROCm/C++ build. Put it somewhere short, e.g. C:\FlashNextVelocity. Current: $Root"}
-$Deps=Join-Path $Root '.deps';$Gufo=Join-Path $Deps 'gufo';$Vcpkg=Join-Path $Deps 'vcpkg';$ProjectRocm=Join-Path $Deps 'rocm';$Downloads=Join-Path $Deps 'downloads';$Cache=Join-Path $Root '.cache';$Build=Join-Path $Root 'build';$Dist=Join-Path $Root 'dist';$Logs=Join-Path $Root 'logs'
+$Deps=Join-Path $Root '.deps';$Vcpkg=Join-Path $Deps 'vcpkg';$ProjectRocm=Join-Path $Deps 'rocm';$Downloads=Join-Path $Deps 'downloads';$Cache=Join-Path $Root '.cache';$Build=Join-Path $Root 'build';$Dist=Join-Path $Root 'dist';$Logs=Join-Path $Root 'logs'
 New-Item -ItemType Directory -Force $Deps,$Downloads,$Cache,$Logs | Out-Null
 $Transcript=Join-Path $Logs ("build-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 Start-Transcript -Path $Transcript -Force | Out-Null
-$GufoCommit='9cad13974cf6da0cd3674b4e0a88b14b7e4a2908';$RocmVersion='10.0.0';$RocmUrl="https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-gfx1151-$RocmVersion.tar.gz";$MsvcComponent='Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64'
+$GufoCommit='cff564964e8506c0abb3e530cecb55332187ac6c';$RocmVersion='10.0.0';$RocmUrl="https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-gfx1151-$RocmVersion.tar.gz";$MsvcComponent='Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64'
 function Has([string]$n){return [bool](Get-Command $n -EA SilentlyContinue)}
 function Winget([string]$id,[string[]]$extra=@()){if(-not(Has winget)){throw "winget is required to install $id"};& winget install --id $id -e --accept-package-agreements --accept-source-agreements @extra;if($LASTEXITCODE -ne 0){throw "winget failed installing $id"}}
 if(-not(Has git)){Winget 'Git.Git';$env:PATH+=';C:\Program Files\Git\cmd'}
@@ -30,11 +30,14 @@ $vcvars=Join-Path $Vs 'VC\Auxiliary\Build\vcvarsall.bat';$lines=& $env:ComSpec /
 # Pinned Gufo checkout. Re-prepare only when the pinned commit or our integrated Windows patch script changes.
 $prepareScript=Join-Path $PSScriptRoot 'prepare-gufo.ps1'
 $prepareHash=(Get-FileHash $prepareScript -Algorithm SHA256).Hash
+$Gufo=Join-Path $env:LOCALAPPDATA "FlashNextVelocity\gufo-$($GufoCommit.Substring(0,12))-$($prepareHash.Substring(0,8))"
 $prepareMarker=Join-Path $Gufo '.flashnextvelocity-prepared.json'
 $needPrepare=$true
 if(-not(Test-Path (Join-Path $Gufo '.git'))){
-  & git -c core.longpaths=true clone https://github.com/gufo-org/gufo.git $Gufo
+  & git -c core.longpaths=true clone --filter=blob:none --no-checkout https://github.com/pixmaate/gufo.git $Gufo
   if($LASTEXITCODE -ne 0){throw 'Gufo clone failed.'}
+  & git -C $Gufo checkout --detach $GufoCommit
+  if($LASTEXITCODE -ne 0){throw 'Pinned Gufo checkout failed.'}
 }else{
   try{
     $head=(& git -C $Gufo rev-parse HEAD).Trim()
@@ -62,12 +65,9 @@ if(-not(Test-Path (Join-Path $Gufo '.git'))){
   }catch{$needPrepare=$true}
 }
 if($needPrepare){
-  & git -C $Gufo fetch origin
-  if($LASTEXITCODE -ne 0){throw 'Gufo fetch failed.'}
-  & git -C $Gufo reset --hard $GufoCommit
-  if($LASTEXITCODE -ne 0){throw 'Gufo reset failed.'}
-  & git -C $Gufo clean -fd
-  if($LASTEXITCODE -ne 0){throw 'Gufo clean failed.'}
+  $head=(& git -C $Gufo rev-parse HEAD).Trim()
+  if($LASTEXITCODE -ne 0 -or $head -ne $GufoCommit){throw "Gufo checkout is not pinned to $GufoCommit`: $Gufo"}
+  if(Test-Path $prepareMarker){throw "Gufo preparation marker does not match this build. Preserve and inspect the source before retrying: $Gufo"}
   & $prepareScript -GufoRoot $Gufo
   if($LASTEXITCODE -ne 0){throw 'Integrated Gufo Windows preparation failed.'}
   $marker=[ordered]@{commit=$GufoCommit;prepare_sha256=$prepareHash}
