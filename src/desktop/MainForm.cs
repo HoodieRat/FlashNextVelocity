@@ -6,7 +6,7 @@ namespace FlashNextVelocity.Desktop;
 
 internal sealed class MainForm : Form
 {
-    private EngineConfig _cfg = EngineConfig.LoadOrCreate();
+    private EngineConfig _cfg;
     private UiSettings _ui = UiSettings.Load();
     private readonly EngineManager _engine = new();
     private readonly ApiClient _api = new();
@@ -17,6 +17,8 @@ internal sealed class MainForm : Form
     private readonly Label _status = new() { AutoSize = true, Text = "Engine stopped" };
     private readonly Label _model = new() { AutoSize = true };
     private readonly Label _mtp = new() { AutoSize = true };
+    private readonly Label _lookupStatus = new() { AutoSize = true };
+    private readonly Label _tuningStatus = new() { AutoSize = true, MaximumSize = new System.Drawing.Size(800, 0) };
     private readonly Label _vision = new() { AutoSize = true };
     private readonly Label _apiUrl = new() { AutoSize = true };
     private readonly RichTextBox _logs = new() { ReadOnly = true, Dock = DockStyle.Fill, BackColor = System.Drawing.Color.FromArgb(18,24,30), ForeColor = System.Drawing.Color.Gainsboro };
@@ -36,17 +38,22 @@ internal sealed class MainForm : Form
     private readonly Label _benchSync = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold) };
 
     private TextBox _modelPath = null!, _mtpPath = null!, _mmprojPath = null!, _host = null!;
-    private NumericUpDown _port = null!, _context = null!, _draft = null!, _draftConfidence = null!, _prefillBatch = null!, _lookupMinNgram = null!, _lookupMaxNgram = null!, _lookupWindow = null!, _lookupMinDraft = null!, _memoryFloor = null!, _defaultTokens = null!, _temp = null!, _topP = null!, _topK = null!, _minP = null!, _repeatPenalty = null!, _repeatLastN = null!;
+    private NumericUpDown _port = null!, _context = null!, _draft = null!, _draftConfidence = null!, _prefillBatch = null!, _lookupMinNgram = null!, _lookupMaxNgram = null!, _lookupWindow = null!, _lookupMinDraft = null!, _memoryFloor = null!, _defaultTokens = null!, _temp = null!, _topP = null!, _topK = null!, _minP = null!, _repeatPenalty = null!, _frequencyPenalty = null!, _presencePenalty = null!, _repeatLastN = null!;
+    private Label _draftConfidenceLabel = null!, _lookupDescription = null!, _effectiveReasoning = null!;
     private CheckBox _contextLookup = null!, _memoryGuard = null!, _thinking = null!, _preserveThinking = null!, _autoEngine = null!, _startWindows = null!;
-    private ComboBox _reasoning = null!, _mtpProposalMode = null!;
+    private ComboBox _reasoning = null!, _mtpProposalMode = null!, _mtpVocabulary = null!, _lookupPolicy = null!;
 
-    public MainForm(string[] args)
+    public MainForm(string[] args) : this(args, EngineConfig.LoadOrCreate(), true) { }
+
+    internal MainForm(string[] args, EngineConfig config, bool initializeShell)
     {
+        _cfg = config;
         Text = "FlashNextVelocity";
         Width = 1180; Height = 900; MinimumSize = new System.Drawing.Size(980, 700);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new System.Drawing.Font("Segoe UI", 9F);
         BuildUi();
+        if (!initializeShell) { _tray = new NotifyIcon(); LoadSettingsControls(); return; }
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Dashboard", null, (_, _) => ShowDashboard());
@@ -105,13 +112,21 @@ internal sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 42)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
         var info = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
         AddInfo(info, 0, "Model", _model); AddInfo(info, 1, "MTP", _mtp); AddInfo(info, 2, "Vision", _vision); AddInfo(info, 3, "API Base", _apiUrl);
+        AddInfo(info, 4, "Context lookup", _lookupStatus); AddInfo(info, 5, "Runtime tuning", _tuningStatus);
         layout.SetColumnSpan(info, 2); layout.Controls.Add(info, 0, 0);
 
         var promptGroup = new GroupBox { Text = "Quick Chat / Code Test", Dock = DockStyle.Fill };
         var promptLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2 }; promptLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); promptLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         promptLayout.Controls.Add(_chatPrompt, 0, 0);
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-        var send = new Button { Text = "Send" }; send.Click += async (_, _) => await Safe(async () => { _chatOutput.Text = "Working..."; _chatOutput.Text = await _api.ChatAsync(_cfg, _chatPrompt.Text, 512); });
+        var send = new Button { Text = "Send" }; send.Click += async (_, _) => await Safe(async () =>
+        {
+            SaveSettings();
+            if (_engine.RequiresRestart(_cfg))
+                throw new InvalidOperationException("Saved settings are not applied to the running engine. Use Save + Restart Engine before sending.");
+            _chatOutput.Text = "Working...";
+            _chatOutput.Text = await _api.ChatAsync(_cfg, _chatPrompt.Text, _cfg.DefaultMaxTokens);
+        });
         var clear = new Button { Text = "Clear" }; clear.Click += (_, _) => _chatOutput.Clear();
         buttons.Controls.AddRange(new Control[] { send, clear }); promptLayout.Controls.Add(buttons, 0, 1); promptGroup.Controls.Add(promptLayout);
         layout.Controls.Add(promptGroup, 0, 1);
@@ -130,23 +145,32 @@ internal sealed class MainForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
         int r = 0;
         _modelPath = AddPath(grid, ref r, "First model shard", "Qwen3.8-Flash-Next...");
-        _mtpPath = AddPath(grid, ref r, "MTP GGUF", "shared Q8_0 MTP");
+        _mtpPath = AddPath(grid, ref r, "MTP GGUF (empty = OFF)", "shared Q8_0 MTP");
         _mmprojPath = AddPath(grid, ref r, "Vision mmproj", "F16 or BF16 mmproj");
         _host = AddText(grid, ref r, "Host");
         _port = AddNumber(grid, ref r, "Port", 1, 65535, 0);
         _context = AddNumber(grid, ref r, "Context", 1024, 1048576, 0);
         _draft = AddNumber(grid, ref r, "MTP draft max", 1, 7, 0);
-        _draftConfidence = AddNumber(grid, ref r, "MTP draft confidence", 0, 1, 2, .01m);
+        _draftConfidenceLabel = new Label { Text = "Draft confidence (sampled MTP only)", AutoSize = true, Anchor = AnchorStyles.Left };
+        grid.Controls.Add(_draftConfidenceLabel, 0, r);
+        _draftConfidence = new NumericUpDown { Minimum = 0, Maximum = 1, DecimalPlaces = 2, Increment = .01m, Dock = DockStyle.Left, Width = 160 };
+        grid.Controls.Add(_draftConfidence, 1, r++);
         grid.Controls.Add(new Label { Text = "MTP proposal mode", AutoSize = true, Anchor = AnchorStyles.Left }, 0, r);
         _mtpProposalMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
         _mtpProposalMode.Items.AddRange(new object[] { "halo_greedy", "distribution" });
         grid.Controls.Add(_mtpProposalMode, 1, r++);
+        _mtpProposalMode.SelectedIndexChanged += (_, _) => UpdateDraftConfidenceControl();
+        _mtpVocabulary = AddChoice(grid, ref r, "MTP draft vocabulary", "latin", "full");
         _prefillBatch = AddNumber(grid, ref r, "Prefill batch (real Gufo)", 128, 4096, 0, 128);
         _contextLookup = AddCheck(grid, ref r, "Context lookup drafting");
         _lookupMinNgram = AddNumber(grid, ref r, "Lookup min n-gram", 2, 32, 0);
         _lookupMaxNgram = AddNumber(grid, ref r, "Lookup max n-gram", 2, 32, 0);
         _lookupWindow = AddNumber(grid, ref r, "Lookup search window", 0, 1048576, 0);
-        _lookupMinDraft = AddNumber(grid, ref r, "Lookup minimum draft", 1, 7, 0);
+        _lookupMinDraft = AddNumber(grid, ref r, "Context lookup minimum draft", 1, 16, 0);
+        _lookupPolicy = AddChoice(grid, ref r, "Lookup policy", "sticky", "fixed6", "fixed16");
+        _lookupDescription = new Label { AutoSize = true, MaximumSize = new System.Drawing.Size(650, 0) };
+        grid.Controls.Add(_lookupDescription, 1, r++);
+        _lookupPolicy.SelectedIndexChanged += (_, _) => UpdateLookupControls();
         _memoryGuard = AddCheck(grid, ref r, "Windows memory guard");
         _memoryFloor = AddNumber(grid, ref r, "Memory guard floor GiB", 0, 128, 1, .5m);
         _contextLookup.CheckedChanged += (_, _) =>
@@ -154,6 +178,7 @@ internal sealed class MainForm : Form
             var enabled = _contextLookup.Checked;
             _lookupMinNgram.Enabled = enabled; _lookupMaxNgram.Enabled = enabled;
             _lookupWindow.Enabled = enabled; _lookupMinDraft.Enabled = enabled;
+            UpdateLookupControls();
         };
         _memoryGuard.CheckedChanged += (_, _) => _memoryFloor.Enabled = _memoryGuard.Checked;
         _defaultTokens = AddNumber(grid, ref r, "Default max tokens", 1, 65536, 0);
@@ -162,6 +187,8 @@ internal sealed class MainForm : Form
         _topK = AddNumber(grid, ref r, "Top K", 0, 1000, 0);
         _minP = AddNumber(grid, ref r, "Min P", 0, 1, 2, .01m);
         _repeatPenalty = AddNumber(grid, ref r, "Repeat penalty", 0.5m, 2, 2, .01m);
+        _frequencyPenalty = AddNumber(grid, ref r, "Frequency penalty", -2, 2, 2, .01m);
+        _presencePenalty = AddNumber(grid, ref r, "Presence penalty", -2, 2, 2, .01m);
         _repeatLastN = AddNumber(grid, ref r, "Repeat last N", 0, 65536, 0);
         _thinking = AddCheck(grid, ref r, "Thinking enabled");
         _preserveThinking = AddCheck(grid, ref r, "Preserve thinking");
@@ -170,8 +197,12 @@ internal sealed class MainForm : Form
         _reasoning = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
         _reasoning.Items.AddRange(new object[] { "low", "medium", "xhigh" });
         grid.Controls.Add(_reasoning, 1, r++);
+        _effectiveReasoning = new Label { AutoSize = true };
+        grid.Controls.Add(_effectiveReasoning, 1, r++);
+        _reasoning.SelectedIndexChanged += (_, _) => UpdateReasoningDisplay();
         _thinking.CheckedChanged += (_, _) =>
         {
+            UpdateReasoningDisplay();
             reasoningLabel.Enabled = _thinking.Checked;
             _reasoning.Enabled = _thinking.Checked;
             _preserveThinking.Enabled = _thinking.Checked;
@@ -273,24 +304,64 @@ internal sealed class MainForm : Form
     private void LoadSettingsControls()
     {
         _modelPath.Text = _cfg.Model; _mtpPath.Text = _cfg.Mtp; _mmprojPath.Text = _cfg.Mmproj; _host.Text = _cfg.Host;
+        _mtpVocabulary.SelectedItem = _cfg.MtpDraftVocabulary;
         Set(_port, _cfg.Port); Set(_context, _cfg.Context); Set(_draft, _cfg.DraftMax); Set(_draftConfidence, (decimal)_cfg.DraftConfidence); Set(_prefillBatch, _cfg.PrefillBatch);
         _mtpProposalMode.SelectedItem = _cfg.MtpProposalMode;
         if (_mtpProposalMode.SelectedIndex < 0) _mtpProposalMode.SelectedItem = "halo_greedy";
+        UpdateDraftConfidenceControl();
         _contextLookup.Checked = _cfg.ContextLookup; Set(_lookupMinNgram, _cfg.ContextLookupMinNgram); Set(_lookupMaxNgram, _cfg.ContextLookupMaxNgram); Set(_lookupWindow, _cfg.ContextLookupWindow); Set(_lookupMinDraft, _cfg.ContextLookupMinDraft);
+        _lookupPolicy.SelectedItem = _cfg.ContextLookupPolicy;
+        UpdateLookupControls();
         _lookupMinNgram.Enabled = _cfg.ContextLookup; _lookupMaxNgram.Enabled = _cfg.ContextLookup; _lookupWindow.Enabled = _cfg.ContextLookup; _lookupMinDraft.Enabled = _cfg.ContextLookup;
         _memoryGuard.Checked = _cfg.MemoryGuard; Set(_memoryFloor, (decimal)_cfg.MemoryGuardMinAvailableGiB); _memoryFloor.Enabled = _cfg.MemoryGuard; Set(_defaultTokens, _cfg.DefaultMaxTokens);
         Set(_temp, (decimal)_cfg.Sampling.Temperature); Set(_topP, (decimal)_cfg.Sampling.TopP); Set(_topK, _cfg.Sampling.TopK); Set(_minP, (decimal)_cfg.Sampling.MinP); Set(_repeatPenalty, (decimal)_cfg.Sampling.RepeatPenalty); Set(_repeatLastN, _cfg.Sampling.RepeatLastN);
+        Set(_frequencyPenalty, (decimal)_cfg.Sampling.FrequencyPenalty); Set(_presencePenalty, (decimal)_cfg.Sampling.PresencePenalty);
         _thinking.Checked = _cfg.Thinking;
         _preserveThinking.Checked = _cfg.PreserveThinking;
         _reasoning.SelectedItem = _cfg.ReasoningEffort;
         if (_reasoning.SelectedIndex < 0) _reasoning.SelectedItem = "medium";
         _reasoning.Enabled = _thinking.Checked;
         _preserveThinking.Enabled = _thinking.Checked;
+        UpdateReasoningDisplay();
         _autoEngine.Checked = _ui.StartEngineOnLaunch; _startWindows.Checked = _ui.StartWithWindows; UpdateStatusLabels();
     }
-    private static void Set(NumericUpDown n, decimal v) => n.Value = Math.Min(n.Maximum, Math.Max(n.Minimum, v));
+    private static void Set(NumericUpDown n, decimal v)
+    {
+        // A valid persisted value must not be rounded or replaced by UI bounds.
+        n.DecimalPlaces = Math.Max(n.DecimalPlaces, (decimal.GetBits(v)[3] >> 16) & 0x7f);
+        if (v < n.Minimum) n.Minimum = v;
+        if (v > n.Maximum) n.Maximum = v;
+        n.Value = v;
+    }
 
-    private void SaveSettings()
+    private ComboBox AddChoice(TableLayoutPanel grid, ref int row, string label, params string[] choices)
+    {
+        grid.Controls.Add(new Label { Text = label, AutoSize = true }, 0, row);
+        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+        combo.Items.AddRange(choices); grid.Controls.Add(combo, 1, row++); return combo;
+    }
+
+    private void UpdateReasoningDisplay() => _effectiveReasoning.Text =
+        $"Effective reasoning: {(_thinking.Checked ? _reasoning.SelectedItem?.ToString() : "OFF")}. Preferred effort is remembered while OFF.";
+
+    private void UpdateLookupControls()
+    {
+        var mode = _lookupPolicy.SelectedItem?.ToString() ?? _cfg.ContextLookupPolicy;
+        var view = _cfg.Clone(); view.ContextLookupPolicy = mode;
+        view.ContextLookup = _contextLookup.Checked;
+        view.ContextLookupCapacity = Math.Max(view.ContextLookupCapacity, view.LookupMaximumWidth);
+        _lookupPolicy.Enabled = view.ContextLookup;
+        _lookupDescription.Text = view.LookupDescription;
+    }
+
+    private void UpdateDraftConfidenceControl()
+    {
+        var sampled = string.Equals(_mtpProposalMode?.SelectedItem?.ToString(), "distribution", StringComparison.OrdinalIgnoreCase);
+        _draftConfidence.Enabled = sampled;
+        _draftConfidenceLabel.Enabled = sampled;
+    }
+
+    internal EngineConfig CaptureSettings()
     {
         _cfg.Model = _modelPath.Text.Trim();
         _cfg.Mtp = _mtpPath.Text.Trim();
@@ -301,12 +372,16 @@ internal sealed class MainForm : Form
         _cfg.DraftMax = (uint)_draft.Value;
         _cfg.DraftConfidence = (double)_draftConfidence.Value;
         _cfg.MtpProposalMode = _mtpProposalMode.SelectedItem?.ToString() ?? "halo_greedy";
+        _cfg.MtpDraftVocabulary = _mtpVocabulary.SelectedItem?.ToString() ?? _cfg.MtpDraftVocabulary;
         _cfg.PrefillBatch = (uint)_prefillBatch.Value;
         _cfg.ContextLookup = _contextLookup.Checked;
         _cfg.ContextLookupMinNgram = (uint)_lookupMinNgram.Value;
         _cfg.ContextLookupMaxNgram = (uint)_lookupMaxNgram.Value;
         _cfg.ContextLookupWindow = (uint)_lookupWindow.Value;
         _cfg.ContextLookupMinDraft = (uint)_lookupMinDraft.Value;
+        _cfg.ContextLookupPolicy = _lookupPolicy.SelectedItem?.ToString() ?? _cfg.ContextLookupPolicy;
+        _cfg.ContextLookupMaxDraft = _cfg.LookupMaximumWidth;
+        _cfg.ContextLookupCapacity = Math.Max(_cfg.ContextLookupCapacity, _cfg.LookupMaximumWidth);
         _cfg.MemoryGuard = _memoryGuard.Checked;
         _cfg.MemoryGuardMinAvailableGiB = (double)_memoryFloor.Value;
         _cfg.DefaultMaxTokens = (int)_defaultTokens.Value;
@@ -315,11 +390,19 @@ internal sealed class MainForm : Form
         _cfg.Sampling.TopK = (int)_topK.Value;
         _cfg.Sampling.MinP = (double)_minP.Value;
         _cfg.Sampling.RepeatPenalty = (double)_repeatPenalty.Value;
+        _cfg.Sampling.FrequencyPenalty = (double)_frequencyPenalty.Value;
+        _cfg.Sampling.PresencePenalty = (double)_presencePenalty.Value;
         _cfg.Sampling.RepeatLastN = (int)_repeatLastN.Value;
         _cfg.Thinking = _thinking.Checked;
         _cfg.PreserveThinking = _preserveThinking.Checked;
         _cfg.ReasoningEffort = _reasoning.SelectedItem?.ToString() ?? "medium";
 
+        return _cfg.Clone();
+    }
+
+    private void SaveSettings()
+    {
+        _cfg = CaptureSettings();
         // Save atomically, then read the exact live dist\config.json back. If a
         // field failed to persist, do not continue with a misleading in-memory
         // configuration.
@@ -335,7 +418,7 @@ internal sealed class MainForm : Form
         _ui.Save();
         ConfigureWindowsStartup(_ui.StartWithWindows);
         UpdateStatusLabels();
-        AppendLog($"ALL settings saved and read-back verified: draft_max={_cfg.DraftMax}, draft_confidence={_cfg.DraftConfidence:0.00}, proposal={_cfg.MtpProposalMode}, prefill_batch={_cfg.PrefillBatch}, lookup={_cfg.ContextLookup}, lookup_ngram={_cfg.ContextLookupMinNgram}-{_cfg.ContextLookupMaxNgram}, memory_guard={_cfg.MemoryGuard}, thinking={_cfg.Thinking}, effort={(_cfg.Thinking ? _cfg.ReasoningEffort : "OFF")}, config={AppPaths.Config}");
+        AppendLog($"ALL settings saved and read-back verified: draft_max={_cfg.DraftMax}, draft_confidence={_cfg.DraftConfidence:0.00}, proposal={_cfg.MtpProposalMode}, prefill_batch={_cfg.PrefillBatch}, lookup={_cfg.ContextLookup}, lookup_ngram={_cfg.ContextLookupMinNgram}-{_cfg.ContextLookupMaxNgram}, lookup_policy={_cfg.ContextLookupPolicy}, lookup_start={_cfg.LookupStartWidth}, lookup_max={_cfg.LookupMaximumWidth}, lookup_capacity={_cfg.ContextLookupCapacity}, memory_guard={_cfg.MemoryGuard}, thinking={_cfg.Thinking}, effort={(_cfg.Thinking ? _cfg.ReasoningEffort : "OFF")}, config={AppPaths.Config}");
         if (_engine.IsRunning && _engine.RequiresRestart(_cfg))
             AppendLog("Saved settings differ from the running engine. Use Restart/Save + Restart; Benchmark will apply them automatically.");
     }
@@ -363,7 +446,14 @@ internal sealed class MainForm : Form
         {
             var h = await _api.HealthAsync(_cfg);
             _status.Text = $"Online  PID {_engine.ProcessId}  loaded {h.LoadSeconds:N1}s"; _status.ForeColor = System.Drawing.Color.ForestGreen;
-            _model.Text = h.Model; _mtp.Text = h.Mtp ? $"ON · {h.MtpProposalMode} · max {h.DraftMax} · conf {h.DraftConfidence:0.00} · lookup {(h.ContextLookup ? "ON" : "OFF")}" : "OFF"; _vision.Text = h.Vision ? "ON" : "OFF"; _apiUrl.Text = _cfg.BaseUrl + "/v1";
+            var confidence = string.Equals(h.MtpProposalMode, "halo_greedy", StringComparison.OrdinalIgnoreCase)
+                ? "confidence n/a (sampled only)"
+                : $"sampled confidence {h.DraftConfidence:0.00}";
+            _lookupStatus.Text = !h.ContextLookup ? "OFF" : h.LookupPolicy == "sticky"
+                ? $"Sticky: start {h.LookupStart} -> promote {h.LookupMaximum}; capacity {h.LookupCapacity}; reset each request."
+                : $"{h.LookupPolicy}: width {h.LookupStart}; capacity {h.LookupCapacity}.";
+            _tuningStatus.Text = h.Tuning;
+            _model.Text = h.Model; _mtp.Text = h.Mtp ? $"ON · {h.MtpDraftVocabulary} · {h.MtpProposalMode} · max {h.DraftMax} · {confidence} · lookup {(h.ContextLookup ? "ON" : "OFF")}" : "OFF"; _vision.Text = h.Vision ? "ON" : "OFF"; _apiUrl.Text = _cfg.BaseUrl + "/v1";
             try { _lastRequest.Text = (await _api.LastRequestAsync(_cfg)).Replace("\n", "\r\n"); } catch { }
             _tray.Text = $"FlashNextVelocity - online - {(h.Mtp ? "MTP" : "no MTP")} - {(h.Vision ? "vision" : "text")}";
         }

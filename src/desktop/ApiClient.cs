@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace FlashNextVelocity.Desktop;
 
-internal sealed record HealthInfo(string Status, string Model, bool Mtp, bool Vision, bool ContextLookup, double LoadSeconds, ulong Context, ulong DraftMax, double DraftConfidence, string MtpProposalMode, ulong PrefillBatch);
+internal sealed record HealthInfo(string Status, string Model, bool Mtp, bool Vision, bool ContextLookup, double LoadSeconds, ulong Context, ulong DraftMax, double DraftConfidence, string MtpProposalMode, ulong PrefillBatch, string MtpDraftVocabulary, string LookupPolicy, ulong LookupStart, ulong LookupMaximum, ulong LookupCapacity, string Tuning);
 internal sealed record BenchmarkResult(double PrefillTps, double DecodeTps, double Acceptance, double LookupAcceptance, ulong Drafted, ulong Accepted, ulong LookupDrafted, ulong LookupAccepted, IReadOnlyList<double> Windows, string Report, double TtftMs, double AvgDraftDepth, double QsaPct, double PleWaitMs, double FallbackPct, double SyncPerToken, string RawJson);
 
 internal sealed class ApiClient : IDisposable
@@ -28,7 +28,13 @@ internal sealed class ApiClient : IDisposable
             x.TryGetProperty("draft_max", out var dm) ? dm.GetUInt64() : 0,
             x.TryGetProperty("draft_confidence", out var dc) ? dc.GetDouble() : 0,
             x.TryGetProperty("mtp_proposal_mode", out var pm) ? pm.GetString() ?? "halo_greedy" : "halo_greedy",
-            x.TryGetProperty("prefill_batch", out var pb) ? pb.GetUInt64() : 2048);
+            x.TryGetProperty("prefill_batch", out var pb) ? pb.GetUInt64() : 2048,
+            x.GetProperty("mtp_draft_vocabulary").GetString() ?? "unknown",
+            x.GetProperty("context_lookup_policy").GetString() ?? "unknown",
+            x.GetProperty("context_lookup_start_width").GetUInt64(),
+            x.GetProperty("context_lookup_promotion_width").GetUInt64(),
+            x.GetProperty("context_lookup_capacity").GetUInt64(),
+            string.Join(", ", x.GetProperty("tuning").EnumerateObject().Select(p => $"{p.Name}={(p.Value.GetBoolean() ? "ON" : "OFF")}")));
     }
 
     public async Task<string> LastRequestAsync(EngineConfig cfg)
@@ -42,20 +48,8 @@ internal sealed class ApiClient : IDisposable
 
     public async Task<string> ChatAsync(EngineConfig cfg, string prompt, int maxTokens)
     {
-        var payload = JsonSerializer.Serialize(new
-        {
-            model = "local",
-            messages = new[] { new { role = "user", content = prompt } },
-            max_tokens = maxTokens,
-            temperature = cfg.Sampling.Temperature,
-            top_p = cfg.Sampling.TopP,
-            top_k = cfg.Sampling.TopK,
-            min_p = cfg.Sampling.MinP,
-            repeat_penalty = cfg.Sampling.RepeatPenalty,
-            repeat_last_n = cfg.Sampling.RepeatLastN,
-            stream = false,
-            chat_template_kwargs = ReasoningArgs(cfg)
-        });
+        var payload = JsonSerializer.Serialize(BuildChatRequest(cfg, prompt, maxTokens,
+            stream: false, profile: false, seed: -1, includeUsage: false));
         using var r = await _http.PostAsync(cfg.BaseUrl + "/v1/chat/completions", new StringContent(payload, Encoding.UTF8, "application/json"));
         var text = await r.Content.ReadAsStringAsync();
         if (!r.IsSuccessStatusCode) throw new InvalidOperationException(ExtractError(text));
@@ -76,6 +70,9 @@ internal sealed class ApiClient : IDisposable
             min_p = cfg.Sampling.MinP,
             repeat_penalty = cfg.Sampling.RepeatPenalty,
             repeat_last_n = cfg.Sampling.RepeatLastN,
+            frequency_penalty = cfg.Sampling.FrequencyPenalty,
+            presence_penalty = cfg.Sampling.PresencePenalty,
+            context_lookup_policy = cfg.ContextLookupPolicy,
             stream = false,
             chat_template_kwargs = ReasoningArgs(cfg)
         });
@@ -91,6 +88,9 @@ internal sealed class ApiClient : IDisposable
             min_p = cfg.Sampling.MinP,
             repeat_penalty = cfg.Sampling.RepeatPenalty,
             repeat_last_n = cfg.Sampling.RepeatLastN,
+            frequency_penalty = cfg.Sampling.FrequencyPenalty,
+            presence_penalty = cfg.Sampling.PresencePenalty,
+            context_lookup_policy = cfg.ContextLookupPolicy,
             stream = false,
             flashnext_profile = true,
             chat_template_kwargs = ReasoningArgs(cfg)
@@ -118,11 +118,37 @@ internal sealed class ApiClient : IDisposable
             report, Num(m, "ttft_ms"), depth, qsaPct, ple, fallback, syncPer, text);
     }
 
+    internal static Dictionary<string, object?> BuildChatRequest(EngineConfig cfg, string prompt,
+        int maxTokens, bool stream, bool profile, long seed, bool includeUsage)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["model"] = "local",
+            ["messages"] = new[] { new { role = "user", content = prompt } },
+            ["max_tokens"] = maxTokens,
+            ["temperature"] = cfg.Sampling.Temperature,
+            ["top_p"] = cfg.Sampling.TopP,
+            ["top_k"] = cfg.Sampling.TopK,
+            ["min_p"] = cfg.Sampling.MinP,
+            ["repeat_penalty"] = cfg.Sampling.RepeatPenalty,
+            ["repeat_last_n"] = cfg.Sampling.RepeatLastN,
+            ["frequency_penalty"] = cfg.Sampling.FrequencyPenalty,
+            ["presence_penalty"] = cfg.Sampling.PresencePenalty,
+            ["context_lookup_policy"] = cfg.ContextLookupPolicy,
+            ["seed"] = seed,
+            ["stream"] = stream,
+            ["flashnext_profile"] = profile,
+            ["chat_template_kwargs"] = ReasoningArgs(cfg)
+        };
+        if (stream && includeUsage) body["stream_options"] = new { include_usage = true };
+        return body;
+    }
+
     private static object ReasoningArgs(EngineConfig cfg) => new
     {
         enable_thinking = cfg.Thinking,
         preserve_thinking = cfg.Thinking && cfg.PreserveThinking,
-        reasoning_effort = cfg.ReasoningEffort
+        reasoning_effort = cfg.EffectiveReasoningEffort.ToLowerInvariant()
     };
 
     private async Task<string> PostAsync(string url, object body)

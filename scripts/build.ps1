@@ -1,3 +1,4 @@
+param([switch]$SkipBundledTests)
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -294,12 +295,14 @@ $CmakeCacheText=Get-Content $CmakeCache -Raw
 if($CmakeCacheText -notmatch '(?m)^CMAKE_HIP_ARCHITECTURES:STRING=gfx1151\r?$'){throw 'Fresh CMake cache is not pinned to gfx1151.'}
 if($CmakeCacheText -match '(?i)C:\\flashfknworkalready'){throw 'Fresh CMake cache still contains a legacy C:\flashfknworkalready path.'}
 Write-Host 'Fresh CMake cache verified: gfx1151 + project-local ROCm.' -ForegroundColor Green
+if (-not $SkipBundledTests) {
 & cmake.exe --build $Build --target FlashNextVelocityUnitTests -j 16;if($LASTEXITCODE -ne 0){throw 'Native unit-test build failed.'}
 $UnitTests=Join-Path $Build 'bin\FlashNextVelocityUnitTests.exe'
 if(-not(Test-Path $UnitTests)){throw 'Native unit-test executable missing after build.'}
 & $UnitTests
 if($LASTEXITCODE -ne 0){throw 'Native MTP/context-lookup/profiler unit tests failed.'}
 Write-Host 'Native MTP/context-lookup/profiler unit tests passed.' -ForegroundColor Green
+}
 & cmake.exe --build $Build --target FlashNextVelocityEngine -j 16;if($LASTEXITCODE -ne 0){throw 'Native engine build failed.'}
 $EngineBin=Join-Path $Build 'bin';$EngineExe=Join-Path $EngineBin 'FlashNextVelocity.Engine.exe';if(-not(Test-Path $EngineExe)){throw 'Native engine executable missing after build.'}
 # Prove that the executable was rebuilt from the repaired compact-verification
@@ -354,7 +357,7 @@ $DistConfig=Join-Path $Dist 'config.json'
 if($null -ne $PreservedConfig){
   [IO.File]::WriteAllText($DistConfig,$PreservedConfig,[Text.UTF8Encoding]::new($false))
 }else{
-  $defaultConfig=@{model='';mtp='';mmproj='';host='127.0.0.1';port=8080;context=131072;draft_max=7;draft_confidence=0.0;mtp_proposal_mode='halo_greedy';prefill_batch=2048;context_lookup=$true;context_lookup_min_ngram=3;context_lookup_max_ngram=6;context_lookup_window=32768;context_lookup_min_draft=2;memory_guard=$true;memory_guard_min_available_gib=8.0;sessions=1;default_max_tokens=4096;thinking=$true;preserve_thinking=$false;reasoning_effort='medium';sampling=@{temperature=.35;top_p=.90;top_k=40;min_p=.05;repeat_penalty=1.05;repeat_last_n=512}}|ConvertTo-Json -Depth 5
+  $defaultConfig=@{model='';mtp='';mmproj='';host='127.0.0.1';port=8080;context=131117;draft_max=6;draft_confidence=0.0;mtp_proposal_mode='halo_greedy';mtp_draft_vocabulary='latin';prefill_batch=2048;context_lookup=$true;context_lookup_min_ngram=3;context_lookup_max_ngram=6;context_lookup_window=32768;context_lookup_min_draft=6;context_lookup_max_draft=16;context_lookup_capacity=16;context_lookup_policy='sticky';memory_guard=$true;memory_guard_min_available_gib=5.0;sessions=1;default_max_tokens=4096;thinking=$false;preserve_thinking=$false;reasoning_effort='medium';sampling=@{temperature=.35;top_p=.90;top_k=40;min_p=.05;repeat_penalty=1.05;frequency_penalty=0;presence_penalty=0;repeat_last_n=512}}|ConvertTo-Json -Depth 5
   [IO.File]::WriteAllText($DistConfig,$defaultConfig,[Text.UTF8Encoding]::new($false))
 }
 if($null -ne $PreservedUi){
@@ -362,11 +365,16 @@ if($null -ne $PreservedUi){
 }
 
 # Strict runtime validation when a model is configured.
-& (Join-Path $PSScriptRoot 'self-test.ps1') -Dist $Dist
-if($LASTEXITCODE -ne 0){throw 'Runtime self-test failed.'}
+if (-not $SkipBundledTests) {
+  & (Join-Path $PSScriptRoot 'self-test.ps1') -Dist $Dist
+  if($LASTEXITCODE -ne 0){throw 'Runtime self-test failed.'}
+} else {
+  Write-Host 'Bundled tests skipped; run the focused configuration validation separately.'
+}
 
 Write-Host ''
-Write-Host 'FLASHNEXTVELOCITY BUILD + RUNTIME VALIDATION PASSED.' -ForegroundColor Green
+if ($SkipBundledTests) { Write-Host 'FLASHNEXTVELOCITY BUILD PASSED. Focused runtime validation must run separately.' -ForegroundColor Green }
+else { Write-Host 'FLASHNEXTVELOCITY BUILD + RUNTIME VALIDATION PASSED.' -ForegroundColor Green }
 Write-Host "Launch: $(Join-Path $Dist 'FlashNextVelocity.exe')" -ForegroundColor Green
 Write-Host 'The tray/dashboard app is the normal entry point from now on.' -ForegroundColor Cyan
 Stop-Transcript | Out-Null

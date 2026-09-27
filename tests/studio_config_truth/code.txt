@@ -1,0 +1,78 @@
+Rename the function normalize_orders to validate_order_lines, including its call site, in the following Python module. Return the entire edited module verbatim, preserving every other character and all whitespace. Begin directly with from dataclasses; no markdown fences or commentary.
+
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Iterable
+
+@dataclass(frozen=True)
+class OrderLine:
+    product_id: str
+    quantity: int
+    unit_price: Decimal
+    category: str
+
+@dataclass(frozen=True)
+class Invoice:
+    order_id: str
+    customer_id: str
+    subtotal: Decimal
+    discount: Decimal
+    tax: Decimal
+    total: Decimal
+    warnings: tuple[str, ...]
+
+
+def normalize_orders(lines: Iterable[OrderLine]) -> list[OrderLine]:
+    result: list[OrderLine] = []
+    for line in lines:
+        if line.quantity <= 0:
+            raise ValueError("quantity must be positive")
+        if line.unit_price < Decimal("0"):
+            raise ValueError("unit price cannot be negative")
+        product_id = line.product_id.strip().upper()
+        if not product_id:
+            raise ValueError("product identifier is required")
+        result.append(OrderLine(product_id, line.quantity, line.unit_price, line.category))
+    return sorted(result, key=lambda item: (item.category, item.product_id))
+
+
+def calculate_subtotal(lines: Iterable[OrderLine]) -> Decimal:
+    subtotal = Decimal("0")
+    for line in lines:
+        subtotal += line.unit_price * line.quantity
+    return subtotal.quantize(Decimal("0.01"))
+
+
+def calculate_discount(subtotal: Decimal, customer_tier: str) -> Decimal:
+    rates = {"standard": Decimal("0"), "silver": Decimal("0.05"), "gold": Decimal("0.10")}
+    rate = rates.get(customer_tier, Decimal("0"))
+    return (subtotal * rate).quantize(Decimal("0.01"))
+
+
+def create_invoice(order_id: str, customer_id: str, lines: Iterable[OrderLine],
+                   customer_tier: str, tax_rate: Decimal) -> Invoice:
+    normalized = normalize_orders(lines)
+    subtotal = calculate_subtotal(normalized)
+    discount = calculate_discount(subtotal, customer_tier)
+    taxable = subtotal - discount
+    tax = (taxable * tax_rate).quantize(Decimal("0.01"))
+    total = taxable + tax
+    warnings: list[str] = []
+    if not normalized:
+        warnings.append("invoice contains no products")
+    if customer_tier not in {"standard", "silver", "gold"}:
+        warnings.append("unknown customer tier; standard pricing applied")
+    return Invoice(order_id, customer_id, subtotal, discount, tax, total, tuple(warnings))
+
+
+def format_invoice(invoice: Invoice) -> str:
+    rows = [
+        f"Order: {invoice.order_id}",
+        f"Customer: {invoice.customer_id}",
+        f"Subtotal: {invoice.subtotal:.2f}",
+        f"Discount: {invoice.discount:.2f}",
+        f"Tax: {invoice.tax:.2f}",
+        f"Total: {invoice.total:.2f}",
+    ]
+    rows.extend(f"Warning: {warning}" for warning in invoice.warnings)
+    return "\n".join(rows)

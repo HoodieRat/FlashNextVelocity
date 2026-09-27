@@ -4,8 +4,8 @@
   "mmproj": "C:\\FlashNextModels\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\mmproj-F16.gguf",
   "host": "127.0.0.1",
   "port": 8080,
-  "context": 131072,
-  "draft_max": 7,
+  "context": 131117,
+  "draft_max": 6,
   "draft_confidence": 0.0,
   "mtp_proposal_mode": "halo_greedy",
   "prefill_batch": 2048,
@@ -18,10 +18,10 @@
   "context_lookup_capacity": 16,
   "context_lookup_policy": "sticky",
   "memory_guard": true,
-  "memory_guard_min_available_gib": 8.0,
+  "memory_guard_min_available_gib": 5.0,
   "sessions": 1,
   "default_max_tokens": 4096,
-  "thinking": true,
+  "thinking": false,
   "preserve_thinking": false,
   "reasoning_effort": "medium",
   "sampling": {
@@ -30,6 +30,9 @@
     "top_k": 40,
     "min_p": 0.05,
     "repeat_penalty": 1.05,
-    "repeat_last_n": 512
-  }
+    "repeat_last_n": 512,
+    "frequency_penalty": 0,
+    "presence_penalty": 0
+  },
+  "mtp_draft_vocabulary": "latin"
 }

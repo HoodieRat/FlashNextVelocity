@@ -153,7 +153,7 @@ internal sealed class EngineManager : IDisposable
         await StartAsync(cfg);
     }
 
-    private static string? FindConfigMismatch(string json, EngineConfig expected)
+    internal static string? FindConfigMismatch(string json, EngineConfig expected)
     {
         using var d = JsonDocument.Parse(json);
         var root = d.RootElement;
@@ -186,6 +186,13 @@ internal sealed class EngineManager : IDisposable
         Check(Int(root, "draft_max") == expected.DraftMax, "draft_max", expected.DraftMax, Int(root, "draft_max"));
         Check(Near(Num(root, "draft_confidence"), expected.DraftConfidence), "draft_confidence", expected.DraftConfidence.ToString("0.00"), Num(root, "draft_confidence"));
         Check(string.Equals(Str(root, "mtp_proposal_mode"), expected.MtpProposalMode, StringComparison.OrdinalIgnoreCase), "mtp_proposal_mode", expected.MtpProposalMode, Str(root, "mtp_proposal_mode"));
+        Check(Str(root, "mtp_draft_vocabulary") == expected.MtpDraftVocabulary, "mtp_draft_vocabulary", expected.MtpDraftVocabulary, Str(root, "mtp_draft_vocabulary"));
+        Check(Bool(root, "mtp") == !string.IsNullOrWhiteSpace(expected.Mtp), "mtp", !string.IsNullOrWhiteSpace(expected.Mtp), Bool(root, "mtp"));
+        Check(Str(root, "context_lookup_policy") == expected.ContextLookupPolicy, "lookup policy", expected.ContextLookupPolicy, Str(root, "context_lookup_policy"));
+        Check(Int(root, "context_lookup_start_width") == expected.LookupStartWidth, "lookup start", expected.LookupStartWidth, Int(root, "context_lookup_start_width"));
+        Check(Int(root, "context_lookup_promotion_width") == expected.LookupMaximumWidth, "lookup maximum", expected.LookupMaximumWidth, Int(root, "context_lookup_promotion_width"));
+        Check(Int(root, "context_lookup_capacity") == expected.ContextLookupCapacity, "lookup capacity", expected.ContextLookupCapacity, Int(root, "context_lookup_capacity"));
+        Check(Str(root, "effective_reasoning_effort") == expected.EffectiveReasoningEffort, "effective reasoning", expected.EffectiveReasoningEffort, Str(root, "effective_reasoning_effort"));
         Check(Int(root, "prefill_batch") == expected.PrefillBatch, "prefill_batch", expected.PrefillBatch, Int(root, "prefill_batch"));
         Check(Bool(root, "context_lookup") == expected.ContextLookup, "context_lookup", expected.ContextLookup, Bool(root, "context_lookup"));
         Check(Int(root, "context_lookup_min_ngram") == expected.ContextLookupMinNgram, "context_lookup_min_ngram", expected.ContextLookupMinNgram, Int(root, "context_lookup_min_ngram"));
@@ -211,6 +218,8 @@ internal sealed class EngineManager : IDisposable
             Check(Int(sampling, "top_k") == expected.Sampling.TopK, "sampling.top_k", expected.Sampling.TopK, Int(sampling, "top_k"));
             Check(Near(Num(sampling, "min_p"), expected.Sampling.MinP), "sampling.min_p", expected.Sampling.MinP, Num(sampling, "min_p"));
             Check(Near(Num(sampling, "repeat_penalty"), expected.Sampling.RepeatPenalty), "sampling.repeat_penalty", expected.Sampling.RepeatPenalty, Num(sampling, "repeat_penalty"));
+            Check(Near(Num(sampling, "frequency_penalty"), expected.Sampling.FrequencyPenalty), "sampling.frequency_penalty", expected.Sampling.FrequencyPenalty, Num(sampling, "frequency_penalty"));
+            Check(Near(Num(sampling, "presence_penalty"), expected.Sampling.PresencePenalty), "sampling.presence_penalty", expected.Sampling.PresencePenalty, Num(sampling, "presence_penalty"));
             Check(Int(sampling, "repeat_last_n") == expected.Sampling.RepeatLastN, "sampling.repeat_last_n", expected.Sampling.RepeatLastN, Int(sampling, "repeat_last_n"));
         }
 

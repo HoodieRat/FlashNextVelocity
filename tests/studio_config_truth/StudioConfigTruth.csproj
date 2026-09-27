@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/desktop/*.cs" Exclude="../../src/desktop/Program.cs" Link="Desktop/%(Filename)%(Extension)" />
+    <None Update="code.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

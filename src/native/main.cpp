@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "src/core/platform/device_memory.hpp"
+#include "src/core/platform/tuning.hpp"
 #include "src/core/image.hpp"
 #include "src/core/json.hpp"
 #include "src/core/sampling.hpp"
@@ -76,8 +77,8 @@ struct Config {
   std::string mmproj;
   std::string host{"127.0.0.1"};
   int port{8080};
-  std::uint32_t context{131072};
-  std::uint32_t draft_max{7};
+  std::uint32_t context{131117};
+  std::uint32_t draft_max{6};
   float draft_confidence{0.0F};
   std::string mtp_proposal_mode{"halo_greedy"};
   std::string mtp_draft_vocabulary{"full"};
@@ -91,10 +92,10 @@ struct Config {
   std::uint32_t context_lookup_capacity{16};
   std::string context_lookup_policy{"sticky"};
   bool memory_guard{true};
-  double memory_guard_min_available_gib{8.0};
+  double memory_guard_min_available_gib{5.0};
   std::uint32_t sessions{1};
   std::size_t default_max_tokens{4096};
-  bool thinking{true};
+  bool thinking{false};
   bool preserve_thinking{false};
   std::string reasoning_effort{"medium"};
   gufo::sampling::SamplingConfig sampling{
@@ -144,6 +145,8 @@ struct Metrics {
   double min_p{0};
   double repeat_penalty{1};
   std::size_t repeat_last_n{0};
+  double frequency_penalty{0};
+  double presence_penalty{0};
   std::uint64_t low_confidence_stops{0};
   std::uint64_t compact_frontier_samples{0};
   std::uint64_t compact_frontier_fallbacks{0};
@@ -242,6 +245,14 @@ std::string Trim(std::string_view value) {
   return std::string(value);
 }
 
+double ReadFiniteNumber(const Value* value, std::string_view name,
+                        double fallback) {
+  if (value == nullptr || value->is_null()) return fallback;
+  if (!value->is_number() || !std::isfinite(value->as_double()))
+    throw std::invalid_argument(std::string(name) + " must be a finite number");
+  return value->as_double();
+}
+
 std::size_t CompleteUtf8Prefix(std::string_view text) {
   std::size_t i = 0;
   while (i < text.size()) {
@@ -310,8 +321,14 @@ Config LoadConfig(const fs::path& path) {
     c.sampling.min_p = static_cast<float>(s->member_double("min_p", c.sampling.min_p));
     c.sampling.repeat_penalty = static_cast<float>(s->member_double("repeat_penalty", c.sampling.repeat_penalty));
     c.sampling.repeat_last_n = s->member_size("repeat_last_n", c.sampling.repeat_last_n);
+    c.sampling.frequency_penalty = static_cast<float>(ReadFiniteNumber(s->find("frequency_penalty"), "sampling.frequency_penalty", c.sampling.frequency_penalty));
+    c.sampling.presence_penalty = static_cast<float>(ReadFiniteNumber(s->find("presence_penalty"), "sampling.presence_penalty", c.sampling.presence_penalty));
   }
   c.sampling.Validate();
+  if (c.reasoning_effort != "low" && c.reasoning_effort != "medium" && c.reasoning_effort != "xhigh")
+    throw std::runtime_error("preferred reasoning_effort must be low, medium, or xhigh");
+  if (c.context_lookup_min_draft > (c.context_lookup_policy == "fixed16" ? 16U : 6U))
+    throw std::runtime_error("lookup minimum draft exceeds policy starting width");
   if (c.mtp_draft_vocabulary != "full" && c.mtp_draft_vocabulary != "latin")
     throw std::runtime_error("mtp_draft_vocabulary must be full or latin");
   if (c.mtp_draft_vocabulary == "latin" && c.sessions != 1)
@@ -357,11 +374,12 @@ std::string_view MtpProposalModeDisplay(std::string_view value) {
 }
 
 gufo::tokenization::QwenReasoningEffort ParseEffort(std::string_view value) {
-  if (value == "low" || value == "minimal")
+  if (value == "low")
     return gufo::tokenization::QwenReasoningEffort::kLow;
   if (value == "medium")
     return gufo::tokenization::QwenReasoningEffort::kMedium;
-  return gufo::tokenization::QwenReasoningEffort::kXHigh;
+  if (value == "xhigh") return gufo::tokenization::QwenReasoningEffort::kXHigh;
+  throw std::invalid_argument("reasoning_effort must be low, medium, xhigh, or off");
 }
 
 std::string_view EffortName(gufo::tokenization::QwenReasoningEffort effort) {
@@ -435,7 +453,10 @@ ChatInput ParseChat(const Value& body, const Config& cfg) {
   if (const auto* kwargs = body.find("chat_template_kwargs"); kwargs && kwargs->is_object()) {
     if (const auto* v = kwargs->find("enable_thinking"); v && v->is_bool()) out.enable_thinking = v->as_bool();
     if (const auto* v = kwargs->find("preserve_thinking"); v && v->is_bool()) out.preserve_thinking = v->as_bool();
-    if (const auto* v = kwargs->find("reasoning_effort"); v && v->is_string()) out.reasoning_effort = ParseEffort(v->get_str());
+    if (const auto* v = kwargs->find("reasoning_effort"); v && v->is_string()) {
+      if (v->get_str() == "off" || v->get_str() == "none") out.enable_thinking = false;
+      else out.reasoning_effort = ParseEffort(v->get_str());
+    }
     if (const auto* v = kwargs->find("add_vision_id"); v && v->is_bool()) out.add_vision_id = v->as_bool();
   }
   if (const auto* v = body.find("reasoning_effort"); v && v->is_string()) {
@@ -946,6 +967,22 @@ std::string FormatLastRequest(const Metrics& m) {
   return o.str();
 }
 
+Value TuningJson() {
+  const auto& t = gufo::platform::PlatformTuning();
+  Value v = Value::object();
+  v["flag_waits"] = t.flag_waits;
+  v["fast_sampling"] = t.fast_sampling;
+  v["verify_graph_candidates"] = t.verify_graph_candidates;
+  v["fused_hc_down"] = t.fused_hc_down;
+  v["copy_kernels"] = t.copy_kernels;
+  v["recorded_rollback"] = t.recorded_rollback;
+  v["keep_rollback_rows"] = t.keep_rollback_rows;
+  v["flush_before_wait"] = t.flush_before_wait;
+  v["hot_first_upload"] = t.hot_first_upload;
+  v["prompt_checkpoint"] = t.prompt_checkpoint;
+  return v;
+}
+
 Value LookupPolicyJson(const Metrics& m) {
   const auto& p = m.lookup_policy;
   Value v = Value::object();
@@ -953,6 +990,8 @@ Value LookupPolicyJson(const Metrics& m) {
   v["hard_capacity"] = static_cast<unsigned long long>(m.lookup_capacity);
   v["starting_width"] = static_cast<unsigned long long>(p.starting_width);
   v["final_width"] = static_cast<unsigned long long>(p.active_width);
+  v["promotion_width"] = p.mode == LookupMode::kFixed6 ? 6 : 16;
+  v["resets_each_request"] = true;
   v["promotions"] = static_cast<unsigned long long>(p.promotions);
   v["promoted"] = p.promotions != 0;
   v["promotion_token_index"] = static_cast<unsigned long long>(p.promotion_token);
@@ -1038,11 +1077,23 @@ Value MetricsJson(const Metrics& m) {
   effective["min_p"] = m.min_p;
   effective["repeat_penalty"] = m.repeat_penalty;
   effective["repeat_last_n"] = static_cast<unsigned long long>(m.repeat_last_n);
+  effective["frequency_penalty"] = m.frequency_penalty;
+  effective["presence_penalty"] = m.presence_penalty;
   effective["draft_max"] = static_cast<unsigned long long>(m.draft_max);
-  effective["draft_confidence"] = m.draft_confidence;
+  effective["draft_confidence"] = m.mtp_proposal_mode == "halo_greedy"
+                                       ? Value()
+                                       : Value(m.draft_confidence);
+  effective["configured_draft_confidence"] = m.draft_confidence;
   effective["mtp_proposal_mode"] = m.mtp_proposal_mode;
   effective["prefill_batch"] = static_cast<unsigned long long>(m.prefill_batch);
   effective["context_lookup"] = m.context_lookup_enabled;
+  effective["context_lookup_policy"] = LookupModeName(m.lookup_policy.mode);
+  effective["context_lookup_start_width"] = static_cast<unsigned long long>(m.lookup_policy.starting_width);
+  effective["context_lookup_promotion_width"] = m.lookup_policy.mode == LookupMode::kFixed6 ? 6 : 16;
+  effective["context_lookup_capacity"] = static_cast<unsigned long long>(m.lookup_capacity);
+  effective["context_lookup_resets_each_request"] = true;
+  effective["mtp_draft_vocab_size"] = static_cast<unsigned long long>(m.mtp_draft_vocab_size);
+  effective["tuning"] = TuningJson();
   effective["context"] = static_cast<unsigned long long>(m.context_capacity);
   v["effective_settings"] = std::move(effective);
   Value speed = Value::array();
@@ -1513,6 +1564,8 @@ class Runtime {
     m.min_p = sampling.min_p;
     m.repeat_penalty = sampling.repeat_penalty;
     m.repeat_last_n = sampling.repeat_last_n;
+    m.frequency_penalty = sampling.frequency_penalty;
+    m.presence_penalty = sampling.presence_penalty;
     m.low_confidence_stops = session_->Statistics().low_confidence_stops - stats0.low_confidence_stops;
     m.compact_frontier_samples = session_->Statistics().compact_frontier_samples - stats0.compact_frontier_samples;
     m.compact_frontier_fallbacks = session_->Statistics().compact_frontier_fallbacks - stats0.compact_frontier_fallbacks;
@@ -1756,7 +1809,7 @@ void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
         Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; Value d = Value::object(); d["content"] = std::string(text); c["delta"] = d; c["finish_reason"] = Value(); cs.push_back(c); chunk["choices"] = cs; Sse(client, chunk);
       }, profile, chat.enable_thinking,
       chat.enable_thinking && chat.preserve_thinking,
-      EffortName(chat.reasoning_effort), lookup_mode);
+      chat.enable_thinking ? EffortName(chat.reasoning_effort) : std::string_view{"OFF"}, lookup_mode);
     Value end = Value::object(); end["id"] = id; end["object"] = "chat.completion.chunk"; end["model"] = runtime.model()->ModelName();
     Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; c["delta"] = Value::object(); c["finish_reason"] = "stop"; cs.push_back(c); end["choices"] = cs;
     if (include_usage) end["usage"] = UsageJson(result.metrics);
@@ -1770,7 +1823,7 @@ void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
   const auto result = runtime.Generate(
       prompt, vision, sampling, max_tokens, {}, profile, chat.enable_thinking,
       chat.enable_thinking && chat.preserve_thinking,
-      EffortName(chat.reasoning_effort), lookup_mode);
+      chat.enable_thinking ? EffortName(chat.reasoning_effort) : std::string_view{"OFF"}, lookup_mode);
   const auto parsed = ParseOutput(result.raw, chat.enable_thinking, !chat.tools.empty());
   if (chat.tool_required && parsed.calls.empty())
     throw std::runtime_error("tool_choice=required but the model did not produce a tool call");
@@ -1849,8 +1902,8 @@ std::string DashboardHtml(const Runtime& runtime) {
 </div></div>
 <script>
 const base=location.origin;
-async function refresh(){try{const h=await fetch(base+'/health').then(r=>r.json());model.textContent=h.model||'-';mtp.textContent=h.mtp?('ON · '+(h.mtp_proposal_mode||'halo_greedy')+' · lookup '+(h.context_lookup_active?'ON':'OFF')):'OFF';vision.textContent=h.vision?'ON':'OFF';statusPill.textContent='online';statusPill.className='pill ok';api.textContent=base+'/v1';const m=await fetch(base+'/metrics').then(r=>r.json());metrics.textContent=JSON.stringify(m,null,2)}catch(e){statusPill.textContent='offline';statusPill.className='pill bad'}}
-async function studioSettings(){const h=await fetch(base+'/health').then(r=>r.json());const s=h.sampling||{};return{temperature:s.temperature,top_p:s.top_p,top_k:s.top_k,min_p:s.min_p,repeat_penalty:s.repeat_penalty,repeat_last_n:s.repeat_last_n,chat_template_kwargs:{enable_thinking:!!h.thinking,preserve_thinking:!!h.thinking&&!!h.preserve_thinking,reasoning_effort:h.reasoning_effort||'medium'}}}
+async function refresh(){try{const h=await fetch(base+'/health').then(r=>r.json());model.textContent=h.model||'-';mtp.textContent=h.mtp?('ON · '+(h.mtp_proposal_mode||'halo_greedy')+' · confidence '+((h.mtp_proposal_mode||'halo_greedy')==='halo_greedy'?'N/A (sampled-only)':'sampled '+Number(h.draft_confidence||0).toFixed(2))+' · '+h.mtp_draft_vocabulary+' · MTP max '+h.draft_max+' · lookup '+(h.context_lookup_active?(h.context_lookup_policy+' start '+h.context_lookup_start_width+' -> '+h.context_lookup_promotion_width+'; resets each request'):'OFF')):'OFF';vision.textContent=h.vision?'ON':'OFF';statusPill.textContent='online';statusPill.className='pill ok';api.textContent=base+'/v1';const m=await fetch(base+'/metrics').then(r=>r.json());metrics.textContent=JSON.stringify(m,null,2)}catch(e){statusPill.textContent='offline';statusPill.className='pill bad'}}
+async function studioSettings(){const h=await fetch(base+'/health').then(r=>r.json());const s=h.sampling??{};return{temperature:s.temperature,top_p:s.top_p,top_k:s.top_k,min_p:s.min_p,repeat_penalty:s.repeat_penalty,repeat_last_n:s.repeat_last_n,frequency_penalty:s.frequency_penalty,presence_penalty:s.presence_penalty,context_lookup_policy:h.context_lookup_policy,chat_template_kwargs:{enable_thinking:!!h.thinking,preserve_thinking:!!h.thinking&&!!h.preserve_thinking,reasoning_effort:(h.effective_reasoning_effort??'OFF').toLowerCase()}}}
 async function chat(){chatOut.textContent='working…';try{const settings=await studioSettings();const body={model:'local',messages:[{role:'user',content:prompt.value}],max_tokens:+maxTokens.value,stream:false,...settings};const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);chatOut.textContent=j.choices?.[0]?.message?.content||JSON.stringify(j,null,2);refresh()}catch(e){chatOut.textContent='ERROR: '+e.message}}
 function clearOut(){chatOut.textContent=''}
 async function bench(){benchOut.textContent='warming up…';try{const settings=await studioSettings();await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:'Reply with one short sentence about speculative decoding.'}],max_tokens:24,stream:false,...settings})});benchOut.textContent='benchmarking…';const longPrompt=('Explain speculative decoding, memory bandwidth, recurrent state, and long-context inference in technically precise, non-repetitive prose. ').repeat(48);const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:longPrompt}],max_tokens:+benchTokens.value,stream:false,flashnext_profile:true,...settings})});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);const m=j.usage?.flashnext_velocity||{};prefill.textContent=(m.prefill_tokens_per_second||0).toFixed(2)+' tok/s';decode.textContent=(m.completion_tokens_per_second||0).toFixed(2)+' tok/s';accept.textContent=(((m.mtp_acceptance!==undefined?m.mtp_acceptance:m.draft_acceptance)||0)*100).toFixed(1)+'%';benchOut.textContent=m.profile_text||('64-token windows: '+JSON.stringify(m.speed_windows_64_tokens||[])+'\nDraft: '+(m.draft_tokens_accepted||0)+'/'+(m.draft_tokens||0));refresh()}catch(e){benchOut.textContent='ERROR: '+e.message}}
@@ -1888,6 +1941,13 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       v["mtp_model_load_count"] = static_cast<unsigned long long>(mtp_load_count.load());
       v["target_shards"] = static_cast<unsigned long long>(runtime.model()->TargetShardCount());
       v["context_lookup_policy"] = runtime.cfg().context_lookup_policy;
+      v["context_lookup_start_width"] = runtime.cfg().context_lookup_policy == "fixed16" ? 16 : 6;
+      v["context_lookup_promotion_width"] = runtime.cfg().context_lookup_policy == "fixed6" ? 6 : 16;
+      v["context_lookup_resets_each_request"] = true;
+      v["tuning"] = TuningJson();
+      hipDeviceProp_t device_properties{};
+      if (hipGetDeviceProperties(&device_properties, 0) == hipSuccess)
+        v["gpu_arch"] = std::string(device_properties.gcnArchName);
       // Expose the exact startup configuration so the Studio can verify that
       // Save/Restart launched the engine from the same dist\config.json the UI
       // just persisted. These are local-only diagnostics, not request overrides.
@@ -1918,17 +1978,32 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       const auto memory = QueryWindowsMemoryHeadroom();
       v["memory_available_bytes"] = static_cast<unsigned long long>(memory.available_physical);
       v["memory_commit_available_bytes"] = static_cast<unsigned long long>(memory.available_commit);
+      gufo::platform::DeviceMemorySnapshot device_memory{};
+      if (gufo::platform::QueryDeviceMemorySnapshot(&device_memory) == hipSuccess) {
+        Value usage = Value::object();
+        usage["source"] = device_memory.wddm ? "WDDM" : "HIP fallback";
+        usage["local_usage_bytes"] = static_cast<unsigned long long>(device_memory.local_usage);
+        usage["shared_usage_bytes"] = static_cast<unsigned long long>(device_memory.shared_usage);
+        v["device_memory"] = std::move(usage);
+      }
       v["sessions"] = static_cast<unsigned long long>(runtime.cfg().sessions);
       v["default_max_tokens"] = static_cast<unsigned long long>(runtime.cfg().default_max_tokens);
       v["thinking"] = runtime.cfg().thinking;
       v["preserve_thinking"] = runtime.cfg().preserve_thinking;
-      v["reasoning_effort"] = runtime.cfg().reasoning_effort;
+      v["reasoning_effort"] = runtime.cfg().reasoning_effort;  // saved preference, compatibility
+      v["preferred_reasoning_effort"] = runtime.cfg().reasoning_effort;
+      v["effective_reasoning_effort"] = runtime.cfg().thinking ? runtime.cfg().reasoning_effort : "OFF";
+      v["effective_preserve_thinking"] = runtime.cfg().thinking && runtime.cfg().preserve_thinking;
+      v["effective_draft_confidence"] = runtime.cfg().mtp_proposal_mode == "halo_greedy"
+          ? Value() : Value(runtime.cfg().draft_confidence);
       Value sampling = Value::object();
       sampling["temperature"] = runtime.cfg().sampling.temperature;
       sampling["top_p"] = runtime.cfg().sampling.top_p;
       sampling["top_k"] = runtime.cfg().sampling.top_k;
       sampling["min_p"] = runtime.cfg().sampling.min_p;
       sampling["repeat_penalty"] = runtime.cfg().sampling.repeat_penalty;
+      sampling["frequency_penalty"] = runtime.cfg().sampling.frequency_penalty;
+      sampling["presence_penalty"] = runtime.cfg().sampling.presence_penalty;
       sampling["repeat_last_n"] = static_cast<unsigned long long>(runtime.cfg().sampling.repeat_last_n);
       v["sampling"] = std::move(sampling);
       SendResponse(client, {200,"application/json",v.dump()}); closesocket(client); return;
