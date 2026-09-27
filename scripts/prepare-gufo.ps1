@@ -21,6 +21,107 @@ Replace-One $p '#include "src/core/gguf_reader.hpp"' @'
 '@
 Replace-One $p '  const int fd = open(path.c_str(), O_RDONLY);' '  const int fd = gufo::win::OpenRead(path);'
 
+# Keep Gufo's LUID-matched DXGI accounting authoritative; expose the values
+# from that same query for one-time FlashNextVelocity startup diagnostics.
+$p=Join-Path $GufoRoot 'src\core\platform\device_memory.hpp'
+Replace-One $p @'
+#ifdef _WIN32
+hipError_t DeviceMemoryInfo(std::size_t* free_bytes,
+                            std::size_t* total_bytes) noexcept;
+'@ @'
+#ifdef _WIN32
+struct DeviceMemorySnapshot {
+  std::size_t hip_free{0}, hip_total{0};
+  std::size_t local_budget{0}, local_usage{0}, local_available{0};
+  std::size_t shared_budget{0}, shared_usage{0}, shared_available{0};
+  std::size_t effective_free{0}, effective_total{0};
+  bool adapter_matched{false}, wddm{false};
+};
+
+hipError_t QueryDeviceMemorySnapshot(DeviceMemorySnapshot* snapshot) noexcept;
+hipError_t DeviceMemoryInfo(std::size_t* free_bytes,
+                            std::size_t* total_bytes) noexcept;
+'@
+
+$p=Join-Path $GufoRoot 'src\core\platform\device_memory.cpp'
+Replace-One $p @'
+hipError_t DeviceMemoryInfo(std::size_t* free_bytes,
+                            std::size_t* total_bytes) noexcept {
+  const hipError_t status = hipMemGetInfo(free_bytes, total_bytes);
+  if (status != hipSuccess) {
+    return status;
+  }
+  // Resolved once: the adapter of a process's HIP device does not change.
+  static IDXGIAdapter3* const adapter = AdapterForCurrentDevice();
+  if (adapter == nullptr) {
+    return status;
+  }
+  DXGI_QUERY_VIDEO_MEMORY_INFO local{};
+  DXGI_QUERY_VIDEO_MEMORY_INFO shared{};
+  if (FAILED(adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+                                           &local)) ||
+      FAILED(adapter->QueryVideoMemoryInfo(
+          0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &shared))) {
+    return status;
+  }
+  const auto available = [](const DXGI_QUERY_VIDEO_MEMORY_INFO& info) {
+    return info.Budget > info.CurrentUsage ? info.Budget - info.CurrentUsage
+                                           : 0;
+  };
+  *free_bytes = static_cast<std::size_t>(available(local) + available(shared));
+  *total_bytes = static_cast<std::size_t>(local.Budget + shared.Budget);
+  return hipSuccess;
+}
+'@ @'
+hipError_t QueryDeviceMemorySnapshot(DeviceMemorySnapshot* snapshot) noexcept {
+  if (snapshot == nullptr) return hipErrorInvalidValue;
+  *snapshot = {};
+  const hipError_t status = hipMemGetInfo(&snapshot->hip_free,
+                                          &snapshot->hip_total);
+  if (status != hipSuccess) return status;
+  snapshot->effective_free = snapshot->hip_free;
+  snapshot->effective_total = snapshot->hip_total;
+  // Resolved once: the adapter of a process's HIP device does not change.
+  static IDXGIAdapter3* const adapter = AdapterForCurrentDevice();
+  if (adapter == nullptr) return hipSuccess;
+  snapshot->adapter_matched = true;
+  DXGI_QUERY_VIDEO_MEMORY_INFO local{};
+  DXGI_QUERY_VIDEO_MEMORY_INFO shared{};
+  if (FAILED(adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+                                           &local)) ||
+      FAILED(adapter->QueryVideoMemoryInfo(
+          0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &shared))) {
+    return hipSuccess;
+  }
+  const auto available = [](const DXGI_QUERY_VIDEO_MEMORY_INFO& info) {
+    return info.Budget > info.CurrentUsage ? info.Budget - info.CurrentUsage
+                                           : 0;
+  };
+  snapshot->local_budget = static_cast<std::size_t>(local.Budget);
+  snapshot->local_usage = static_cast<std::size_t>(local.CurrentUsage);
+  snapshot->local_available = static_cast<std::size_t>(available(local));
+  snapshot->shared_budget = static_cast<std::size_t>(shared.Budget);
+  snapshot->shared_usage = static_cast<std::size_t>(shared.CurrentUsage);
+  snapshot->shared_available = static_cast<std::size_t>(available(shared));
+  snapshot->effective_free = snapshot->local_available + snapshot->shared_available;
+  snapshot->effective_total = snapshot->local_budget + snapshot->shared_budget;
+  snapshot->wddm = true;
+  return hipSuccess;
+}
+
+hipError_t DeviceMemoryInfo(std::size_t* free_bytes,
+                            std::size_t* total_bytes) noexcept {
+  if (free_bytes == nullptr || total_bytes == nullptr) return hipErrorInvalidValue;
+  DeviceMemorySnapshot snapshot{};
+  const hipError_t status = QueryDeviceMemorySnapshot(&snapshot);
+  if (status == hipSuccess) {
+    *free_bytes = snapshot.effective_free;
+    *total_bytes = snapshot.effective_total;
+  }
+  return status;
+}
+'@
+
 # Standard F16 Qwen mmproj support. Gufo's working kernels stay BF16/F32; the
 # sidecar is converted once during lazy vision upload.
 $p=Join-Path $GufoRoot 'src\models\qwen\vision\encoder.hip'

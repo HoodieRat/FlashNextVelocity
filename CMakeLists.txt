@@ -52,6 +52,7 @@ add_library(fnv_core STATIC
   ${GUFO_ROOT}/src/core/crypto/sha256.cpp
   ${GUFO_ROOT}/src/core/quant/ggml_dequant.cpp
   ${GUFO_ROOT}/src/core/image.cpp
+  ${GUFO_ROOT}/src/core/platform/device_memory.cpp
   ${GUFO_ROOT}/src/core/hip/weight_upload.cpp
   ${GUFO_ROOT}/src/models/qwen/tokenizer.cpp
   ${GUFO_ROOT}/src/models/qwen/chat_template.cpp
@@ -92,7 +93,7 @@ target_compile_options(fnv_core PRIVATE
 target_link_libraries(fnv_core PUBLIC
   Threads::Threads ICU::uc ICU::i18n OpenSSL::Crypto PNG::PNG JPEG::JPEG
   CURL::libcurl hip::host roc::hipblas roc::hipblaslt roc::rocblas
-  gufo_posix_compat ws2_32 bcrypt)
+  gufo_posix_compat ws2_32 bcrypt dxgi)
 
 # Gufo's qwen38_flash_next CMakeLists links a target named gufo_core.
 # Expose our Windows core implementation under that expected target name so

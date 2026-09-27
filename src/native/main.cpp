@@ -35,6 +35,7 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/platform/device_memory.hpp"
 #include "src/core/image.hpp"
 #include "src/core/json.hpp"
 #include "src/core/sampling.hpp"
@@ -1186,9 +1187,43 @@ std::uint64_t WindowsAvailableMemoryBytes() {
 }
 
 
+void LogDeviceMemory(std::string_view stage) {
+  gufo::platform::DeviceMemorySnapshot memory{};
+  const auto status = gufo::platform::QueryDeviceMemorySnapshot(&memory);
+  if (status != hipSuccess) {
+    std::cout << "Device memory " << stage << ": query failed ("
+              << hipGetErrorString(status) << ")\n" << std::flush;
+    return;
+  }
+  std::size_t effective_free = 0, effective_total = 0;
+  const auto admission_status =
+      gufo::platform::DeviceMemoryInfo(&effective_free, &effective_total);
+  if (admission_status != hipSuccess) {
+    std::cout << "Device memory " << stage << ": admission query failed ("
+              << hipGetErrorString(admission_status) << ")\n" << std::flush;
+    return;
+  }
+  std::cout << "Device memory " << stage
+            << ": source=" << (memory.wddm ? "WDDM" : "HIP fallback")
+            << " adapter_matched=" << memory.adapter_matched
+            << " hip_free=" << memory.hip_free
+            << " hip_total=" << memory.hip_total
+            << " local_budget=" << memory.local_budget
+            << " local_usage=" << memory.local_usage
+            << " local_available=" << memory.local_available
+            << " shared_budget=" << memory.shared_budget
+            << " shared_usage=" << memory.shared_usage
+            << " shared_available=" << memory.shared_available
+            << " effective_free=" << effective_free
+            << " effective_total=" << effective_total << " bytes\n"
+            << std::flush;
+}
+
+
 class Runtime {
  public:
   explicit Runtime(Config cfg) : cfg_(std::move(cfg)) {
+    LogDeviceMemory("before model load");
     CheckMemoryFloor("before model load");
     gufo::models::qwen38_flash_next::ModelOptions options;
     options.max_context = cfg_.context;
@@ -1212,6 +1247,7 @@ class Runtime {
     session_ = model_->CreateSession(mode, cfg_.context, &error);
     if (!session_) throw std::runtime_error("session creation failed: " + error);
     CheckMemoryFloor("after model load");
+    LogDeviceMemory("after model load");
     load_seconds_ = std::chrono::duration<double>(Clock::now() - start).count();
     std::cout << "Loaded " << model_->ModelName() << " in " << std::fixed << std::setprecision(2)
               << load_seconds_ << "s; resident " << (model_->ResidentBytes() / double(1ULL<<30))
