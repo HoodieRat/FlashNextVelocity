@@ -136,36 +136,6 @@ void Close(int fd) noexcept {
   if (fd >= 0) (void)_close(fd);
 }
 
-std::optional<std::uint64_t> FileSize(int fd) noexcept {
-  HANDLE handle = HandleFromFd(fd);
-  if (handle == INVALID_HANDLE_VALUE) return std::nullopt;
-  LARGE_INTEGER value{};
-  if (!GetFileSizeEx(handle, &value) || value.QuadPart < 0) return std::nullopt;
-  return static_cast<std::uint64_t>(value.QuadPart);
-}
-
-void* MapReadOnly(int fd, std::size_t bytes) noexcept {
-  HANDLE file = HandleFromFd(fd);
-  if (file == INVALID_HANDLE_VALUE || bytes == 0) return nullptr;
-  HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
-  if (mapping == nullptr) return nullptr;
-  void* view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, bytes);
-  CloseHandle(mapping);
-  return view;
-}
-
-void Unmap(void* address, std::size_t) noexcept {
-  if (address != nullptr) (void)UnmapViewOfFile(address);
-}
-
-void Prefetch(void* address, std::size_t bytes) noexcept {
-  // Linux MADV_SEQUENTIAL is only an access-pattern hint. PrefetchVirtualMemory
-  // would eagerly fault tens of GiB into the Windows working set, defeating
-  // Flash-Next's disk-resident PLE design. Keep the mapping lazy.
-  (void)address;
-  (void)bytes;
-}
-
 std::int64_t PRead(int fd, void* buffer, std::size_t bytes,
                    std::uint64_t offset) noexcept {
   if (bytes == 0) return 0;

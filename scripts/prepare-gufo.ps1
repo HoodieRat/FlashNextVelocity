@@ -12,110 +12,14 @@ function Replace-One([string]$Path,[AllowEmptyString()][string]$Old,[AllowEmptyS
   if($c -ne 1){throw "Source integration mismatch in ${Path}. Expected 1 occurrence, found $c.`nNeedle:`n$o"}
   Put $Path ($s.Replace($o,$n))
 }
-function Replace-All([string]$Path,[string]$Old,[AllowEmptyString()][string]$New){
-  $s=N([IO.File]::ReadAllText($Path));$o=N($Old);$n=N($New);$c=Count $s $o
-  if($c -lt 1){throw "Source integration needle not found in ${Path}: $o"}
-  Put $Path ($s.Replace($o,$n))
-}
-
-# Windows file mapping for GGUF.
+# Retain the GGUF reader's overlapped handle for FlashNextVelocity's PLE reads.
+# Gufo's Win32 POSIX layer owns mapping, stat, close, and all other file I/O.
 $p=Join-Path $GufoRoot 'src\core\gguf_reader.cpp'
-Replace-One $p @'
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-'@ @'
+Replace-One $p '#include "src/core/gguf_reader.hpp"' @'
+#include "src/core/gguf_reader.hpp"
 #include "win_file.hpp"
 '@
-Replace-All $p 'munmap(mmap_addr_, size_);' 'gufo::win::Unmap(mmap_addr_, size_);'
-Replace-All $p 'close(fd_);' 'gufo::win::Close(fd_);'
 Replace-One $p '  const int fd = open(path.c_str(), O_RDONLY);' '  const int fd = gufo::win::OpenRead(path);'
-Replace-One $p @'
-  struct stat sb{};
-  if (fstat(fd, &sb) != 0 || sb.st_size <= 0) {
-    close(fd);
-'@ @'
-  const auto file_size = gufo::win::FileSize(fd);
-  if (!file_size.has_value() || *file_size == 0) {
-    gufo::win::Close(fd);
-'@
-Replace-One $p '  const auto size = static_cast<std::size_t>(sb.st_size);' '  const auto size = static_cast<std::size_t>(*file_size);'
-Replace-One $p '  void* const addr = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);' '  void* const addr = gufo::win::MapReadOnly(fd, size);'
-Replace-One $p '  if (addr == MAP_FAILED) {' '  if (addr == nullptr) {'
-Replace-One $p '  (void)madvise(addr, size, MADV_SEQUENTIAL);' '  gufo::win::Prefetch(addr, size);'
-Replace-All $p 'close(fd);' 'gufo::win::Close(fd);'
-
-# Parallel weight upload file I/O.
-$p=Join-Path $GufoRoot 'src\core\hip\weight_upload.cpp'
-Replace-One $p @'
-#include <fcntl.h>
-#include <hip/hip_runtime.h>
-#include <sys/stat.h>
-#include <unistd.h>
-'@ @'
-#include <hip/hip_runtime.h>
-#include "win_file.hpp"
-'@
-Replace-One $p @'
-    const auto n = ::pread(fd, static_cast<char*>(buffer) + got, length - got,
-                           static_cast<off_t>(offset + got));
-'@ @'
-    const auto n = gufo::win::PRead(fd, static_cast<char*>(buffer) + got,
-                                    length - got, offset + got);
-'@
-Replace-All $p '::close(shard.fd);' 'gufo::win::Close(shard.fd);'
-Replace-All $p '::close(shard.direct_fd);' 'gufo::win::Close(shard.direct_fd);'
-Replace-One $p @'
-      (void)::posix_fadvise(shard.fd, static_cast<off_t>(task.offset),
-                            static_cast<off_t>(task.size), POSIX_FADV_DONTNEED);
-'@ @'
-      // Windows direct staging reads do not need a page-cache eviction hint.
-'@
-Replace-One $p @'
-    shard.fd = ::fcntl(region.file_descriptor, F_DUPFD_CLOEXEC, 0);
-    struct stat info{};
-    if (shard.fd < 0 || ::fstat(shard.fd, &info) != 0 || info.st_size <= 0 ||
-        static_cast<std::uint64_t>(info.st_size) != region.size) {
-'@ @'
-    shard.fd = gufo::win::DuplicateFd(region.file_descriptor);
-    const auto file_size = gufo::win::FileSize(shard.fd);
-    if (shard.fd < 0 || !file_size.has_value() || *file_size == 0 ||
-        *file_size != region.size) {
-'@
-Replace-One $p '    shard.size = static_cast<std::uint64_t>(info.st_size);' '    shard.size = *file_size;'
-Replace-One $p @'
-    // Reopening the retained descriptor creates an independent O_DIRECT file
-    // description without resolving the original, replaceable pathname.
-    const auto path = "/proc/self/fd/" + std::to_string(shard.fd);
-    shard.direct_fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT);
-'@ @'
-    shard.direct_fd = gufo::win::OpenDirectFromFd(shard.fd);
-'@
-Replace-One $p '      if (!read && errno != EINVAL && errno != EOPNOTSUPP) {' '      if (!read && errno != EINVAL) {'
-
-# Winsock image URL safety path.
-$p=Join-Path $GufoRoot 'src\core\image.cpp'
-Replace-One $p @'
-#include <curl/curl.h>
-#include <jpeglib.h>
-#include <netinet/in.h>
-#include <png.h>
-#include <sys/socket.h>
-'@ @'
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <curl/curl.h>
-#include <jpeglib.h>
-#include <png.h>
-'@
-Replace-One $p @'
-        return ::socket(endpoint->family, endpoint->socktype | SOCK_CLOEXEC,
-                        endpoint->protocol);
-'@ @'
-        return ::socket(endpoint->family, endpoint->socktype,
-                        endpoint->protocol);
-'@
 
 # Standard F16 Qwen mmproj support. Gufo's working kernels stay BF16/F32; the
 # sidecar is converted once during lazy vision upload.
