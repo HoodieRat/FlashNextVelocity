@@ -1,11 +1,14 @@
 #include "src/models/qwen38_flash_next/ngram.hpp"
 
 #include "bench_profile.hpp"
-#include "win_file.hpp"
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <bit>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <unordered_map>
 
@@ -17,6 +20,9 @@ namespace {
 constexpr std::size_t kPage = 4096;
 // Keep enough direct reads outstanding while layer 0 runs.
 constexpr std::size_t kWorkers = 32;
+#ifdef _WIN32
+constexpr std::size_t kWindowsWorkers = 128;
+#endif
 constexpr std::size_t kReadBatch = 8;
 constexpr std::size_t kBatchJobs = 1024;
 constexpr std::size_t kCacheBytes = 8 * 1024 * 1024;
@@ -69,7 +75,7 @@ NgramTable::~NgramTable() {
     w.join();
   }
   if (fd_ >= 0) {
-    gufo::win::Close(fd_);
+    ::close(fd_);
   }
 }
 
@@ -94,12 +100,23 @@ std::unique_ptr<NgramTable> NgramTable::Open(
   t->cache_rows_.resize(t->cache_count_ * t->row_bytes_);
   t->rows_ = rows;
   t->base_offset_ = file_offset;
-  // Windows equivalent of O_DIRECT + pread.
-  t->fd_ = gufo::win::OpenDirectFromFd(file_descriptor);
-  t->direct_ = t->fd_ >= 0;
-  if (t->fd_ < 0) {
-    t->fd_ = gufo::win::DuplicateFd(file_descriptor);
+  const auto path = "/proc/self/fd/" + std::to_string(file_descriptor);
+#ifdef _WIN32
+  t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_CONCURRENT_RANDOM);
+  t->direct_ = false;
+  const bool random_handle = t->fd_ >= 0;
+  if (!random_handle) {
+    const int random_errno = errno;
+    t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    std::fprintf(stderr,
+                 "PLE ngram random handle unavailable (errno=%d); using cached fallback\n",
+                 random_errno);
   }
+#else
+  t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT);
+  t->direct_ = t->fd_ >= 0;
+  if (t->fd_ < 0) t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+#endif
   if (t->fd_ < 0) {
     if (error_msg != nullptr) {
       *error_msg = std::string("cannot open bound n-gram table: ") +
@@ -107,11 +124,22 @@ std::unique_ptr<NgramTable> NgramTable::Open(
     }
     return nullptr;
   }
+#ifdef _WIN32
+  const std::size_t workers = kWindowsWorkers;
+#else
   const std::size_t workers = std::min(
       kWorkers, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+#endif
   for (std::size_t i = 0; i < std::max<std::size_t>(1, workers); ++i) {
     t->workers_.emplace_back([raw = t.get()] { raw->Worker(); });
   }
+#ifdef _WIN32
+  std::fprintf(stdout, "PLE ngram mode=%s workers=%zu cache_bytes=%zu rows=%llu row_bytes=%zu\n",
+               random_handle ? "cached-overlapped-random" : "fallback-cached",
+               t->workers_.size(), kCacheBytes,
+               static_cast<unsigned long long>(rows), t->row_bytes_);
+  std::fflush(stdout);
+#endif
   return t;
 }
 
@@ -185,7 +213,7 @@ bool NgramTable::ReadOne(std::uint32_t row, float* dst,
   } disk_timer;
   std::size_t got = 0;
   while (got < needed) {
-    const std::int64_t n = gufo::win::PRead(fd_, base + got, length - got, begin + got);
+    const std::int64_t n = ::pread(fd_, base + got, length - got, begin + got);
     if (n <= 0) {
       if (n < 0 && errno == EINTR) {
         continue;
