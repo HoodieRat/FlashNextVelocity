@@ -1,0 +1,38 @@
+{
+  "scope": "47 Q4_K routed gate/up layers and their compatible shared-expert input, per 2/3-row verification round",
+  "source_dtype": "FP32",
+  "prepared_dtype": "row-major block_q8_1, 32 int8 + half2(d,sum(x)), 36 bytes/block",
+  "source_width": 2560,
+  "blocks_per_row": 80,
+  "bytes_per_row": 2880,
+  "quantizer": "quantize_row_q8_1_hip -> quantize_q8_1",
+  "math": "Original maxabs and sum reduction; d=maxabs/127; q=roundf(x/d) or zero; FP16 scale/sum stored. No arithmetic changes.",
+  "per_shape": {
+    "2": {
+      "unique_batches": 47,
+      "unique_rows": 94,
+      "baseline_compatible_preparation_launches": 94,
+      "baseline_prepared_row_instances": 188,
+      "minimum_launches": 47,
+      "redundant_launches": 47,
+      "candidate_avoided_launches": 47,
+      "prefix_saved": 1,
+      "suffix_saved": 46
+    },
+    "3": {
+      "unique_batches": 47,
+      "unique_rows": 141,
+      "baseline_compatible_preparation_launches": 94,
+      "baseline_prepared_row_instances": 282,
+      "minimum_launches": 47,
+      "redundant_launches": 47,
+      "candidate_avoided_launches": 47,
+      "prefix_saved": 1,
+      "suffix_saved": 46
+    }
+  },
+  "lifetime": "One Moe invocation. Shared GatedDense returns Q8Input in existing alternating slot. One shared-down Quantize writes opposite slot. Routed Q4 consumer reads first slot on same stream before next overwrite. Capture cursor alternation unchanged.",
+  "baseline_scope": "Routed operation already quantizes once for both gate/up and all experts. Duplicate is earlier shared-expert preparation of identical x. Router consumes float; shared-down consumes different tensor; Q5 layer2 excluded.",
+  "evidence": "graph-audit.json stores every eligible node; source dataflow proves identical x because saved topology has no kernel argument values.",
+  "candidate": "Explicit prepared-input API; original grouped gate/up dispatch untouched; pool group scratch only, no extra buffers/copies/sync. Row2/3 Q4 verification gate; all other paths baseline."
+}

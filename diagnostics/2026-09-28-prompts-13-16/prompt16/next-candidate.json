@@ -1,0 +1,217 @@
+{
+  "recommendation": "Future narrow rows2/3 FP32 MoE epilogue dispatch comparison, only if Prompt16 loses",
+  "status": "STRUCTURAL CANDIDATE ONLY; no timing attribution or gain established",
+  "baseline": "Executor::MoeExperts -> MoeEpilogue -> MoeEpilogueKernel",
+  "existing_candidate": "MoeEpilogueVec4 -> MoeEpilogueVec4Kernel<float>",
+  "current_candidate_selection": "Existing vector path selected by MatrixRows(n_tokens);2/3-row verification currently uses scalar path.",
+  "shape": {
+    "tokens": [
+      2,
+      3
+    ],
+    "selected_experts": 10,
+    "hidden": 2560,
+    "router_gate_stride": 513,
+    "expert_output_layout": "float32[tokens][10][2560]",
+    "output_layout": "float32[tokens][2560]",
+    "baseline_grid": [
+      "tokens",
+      10,
+      1
+    ],
+    "candidate_grid": [
+      "tokens",
+      3,
+      1
+    ],
+    "block": [
+      256,
+      1,
+      1
+    ],
+    "baseline_launches_per_round": 48,
+    "candidate_launches_per_round": 48
+  },
+  "source": {
+    "dispatch": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp:2099",
+    "scalar_kernel": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp:2458",
+    "vector_kernel": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp:2483",
+    "vector_wrapper": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp:5842"
+  },
+  "historical_graphs": [
+    {
+      "rows": 2,
+      "piece": "prefix",
+      "count": 1,
+      "node_indices": [
+        37
+      ],
+      "observed_grid": [
+        2,
+        10,
+        1
+      ],
+      "observed_block": [
+        256,
+        1,
+        1
+      ]
+    },
+    {
+      "rows": 2,
+      "piece": "suffix",
+      "count": 47,
+      "node_indices": [
+        47,
+        82,
+        118,
+        153,
+        188,
+        223,
+        259,
+        294,
+        329,
+        364,
+        400,
+        435,
+        470,
+        505,
+        541,
+        576,
+        611,
+        646,
+        682,
+        717,
+        752,
+        787,
+        823,
+        858,
+        893,
+        928,
+        964,
+        999,
+        1034,
+        1069,
+        1105,
+        1140,
+        1175,
+        1210,
+        1246,
+        1281,
+        1316,
+        1351,
+        1387,
+        1422,
+        1457,
+        1492,
+        1528,
+        1563,
+        1598,
+        1633,
+        1669
+      ],
+      "observed_grid": [
+        2,
+        10,
+        1
+      ],
+      "observed_block": [
+        256,
+        1,
+        1
+      ]
+    },
+    {
+      "rows": 3,
+      "piece": "prefix",
+      "count": 1,
+      "node_indices": [
+        38
+      ],
+      "observed_grid": [
+        3,
+        10,
+        1
+      ],
+      "observed_block": [
+        256,
+        1,
+        1
+      ]
+    },
+    {
+      "rows": 3,
+      "piece": "suffix",
+      "count": 47,
+      "node_indices": [
+        48,
+        83,
+        120,
+        156,
+        192,
+        228,
+        265,
+        301,
+        337,
+        373,
+        410,
+        446,
+        482,
+        518,
+        555,
+        591,
+        627,
+        663,
+        700,
+        736,
+        772,
+        808,
+        845,
+        881,
+        917,
+        953,
+        990,
+        1026,
+        1062,
+        1098,
+        1135,
+        1171,
+        1207,
+        1243,
+        1280,
+        1316,
+        1352,
+        1388,
+        1425,
+        1461,
+        1497,
+        1533,
+        1570,
+        1606,
+        1642,
+        1678,
+        1715
+      ],
+      "observed_grid": [
+        3,
+        10,
+        1
+      ],
+      "observed_block": [
+        256,
+        1,
+        1
+      ]
+    }
+  ],
+  "historical_graph_evidence": "<workspace>\\benchmarks\\prompt13_2-verification-graph-topology.json",
+  "historical_graph_evidence_sha256": "c0344800dadffb3ea28abe3dbc496447fdb4e44a072b40d976194eea634f276e",
+  "numerical_contract": "Both iterate selected expert slots in original order per output and add sigmoid(router_shared_gate)*shared_output. Vector path handles4 adjacent output channels/thread. Require bitwise checks because compiler contraction may differ. Hidden2560 divisible4; existing scratch allocation alignment must be verified before switching.",
+  "scope": "Target verification2/3 rows only; no routing IDs/weights changes, projection changes, quantization changes, preparation reuse, HC changes, MTP or lookup changes.",
+  "cautions": [
+    "Fewer CTAs is structural and may reduce useful parallelism; no speedup predicted.",
+    "Same48 launch count; this does not remove graph nodes.",
+    "Existing vector path is production-used on larger rows, which does not prove small-row benefit.",
+    "Recommended for a later task only; no source edits or GPU work performed for it."
+  ]
+}

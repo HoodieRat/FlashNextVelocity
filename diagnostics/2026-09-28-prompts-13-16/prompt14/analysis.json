@@ -1,0 +1,566 @@
+{
+  "groups": {
+    "A": {
+      "completed": true,
+      "error": null,
+      "runs": [
+        {
+          "number": 1,
+          "decode_tps": 36.08411918566207,
+          "prefill_tps": 876.5196047340485,
+          "ttft_ms": 1397.4611,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1376.4670996069908,
+          "dependency_bound_verify_ms": 12355.602200746536,
+          "mtp_only_cycle_ms": 14079.79199975729,
+          "all_speculative_cycle_ms": 14150.608000159264,
+          "rollback_ms": 279.0588005185127,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1567.8307999372482,
+            "ms_per_output_token": 3.068162035102247
+          },
+          "graph_captures_all_profiled": 12,
+          "verification_graph_captures": 6,
+          "verification_graph_replays": 506,
+          "path_counters": {
+            "baseline_q4_grouped": 12126,
+            "candidate_small_row": 0,
+            "candidate_rows2": 0,
+            "candidate_rows3": 0,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 141,
+            "candidate_small_row": 0,
+            "candidate_rows2": 0,
+            "candidate_rows3": 0,
+            "fallback_other_rows": 47
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.745098114013672,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5930.038600385189,
+              "ms_per_round": 44.924534851402946,
+              "flag_wait_ms": 5364.410500347614,
+              "ple_wait_ms": 60.50029981136322
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6053.324500381947,
+              "ms_per_round": 50.44437083651622,
+              "flag_wait_ms": 5528.873900294304,
+              "ple_wait_ms": 56.03599989414215
+            }
+          }
+        },
+        {
+          "number": 2,
+          "decode_tps": 36.0269857492896,
+          "prefill_tps": 1343.335745956646,
+          "ttft_ms": 948.6312,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1375.0989001393318,
+          "dependency_bound_verify_ms": 12363.033999741077,
+          "mtp_only_cycle_ms": 14099.02479928732,
+          "all_speculative_cycle_ms": 14172.3311997056,
+          "rollback_ms": 286.9818003177643,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1572.5226990580559,
+            "ms_per_output_token": 3.0773438337731034
+          },
+          "graph_captures_all_profiled": 12,
+          "verification_graph_captures": 10,
+          "verification_graph_replays": 516,
+          "path_counters": {
+            "baseline_q4_grouped": 12126,
+            "candidate_small_row": 0,
+            "candidate_rows2": 0,
+            "candidate_rows3": 0,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 235,
+            "candidate_small_row": 0,
+            "candidate_rows2": 0,
+            "candidate_rows3": 0,
+            "fallback_other_rows": 141
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.772758483886719,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5933.480199873447,
+              "ms_per_round": 44.950607574798845,
+              "flag_wait_ms": 5361.65120023489,
+              "ple_wait_ms": 74.88640034198761
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6044.824499845505,
+              "ms_per_round": 50.37353749871254,
+              "flag_wait_ms": 5505.5428003668785,
+              "ple_wait_ms": 65.40439993143082
+            }
+          }
+        },
+        {
+          "number": 3,
+          "decode_tps": 36.02634390089403,
+          "prefill_tps": 1327.5451604654543,
+          "ttft_ms": 957.6798,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1377.7648001909256,
+          "dependency_bound_verify_ms": 12359.635800540447,
+          "mtp_only_cycle_ms": 14099.742800712585,
+          "all_speculative_cycle_ms": 14171.82920062542,
+          "rollback_ms": 288.67990070581436,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1581.4077994823456,
+            "ms_per_output_token": 3.0947315058362928
+          },
+          "graph_captures_all_profiled": 10,
+          "verification_graph_captures": 10,
+          "verification_graph_replays": 516,
+          "path_counters": {
+            "baseline_q4_grouped": 12126,
+            "candidate_small_row": 0,
+            "candidate_rows2": 0,
+            "candidate_rows3": 0,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 235,
+            "candidate_small_row": 0,
+            "candidate_rows2": 0,
+            "candidate_rows3": 0,
+            "fallback_other_rows": 141
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.753959655761719,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5919.736900210381,
+              "ms_per_round": 44.846491668260455,
+              "flag_wait_ms": 5356.14710021019,
+              "ple_wait_ms": 83.22730016708374
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6058.634100317955,
+              "ms_per_round": 50.488617502649625,
+              "flag_wait_ms": 5534.033800065517,
+              "ple_wait_ms": 79.30570006370544
+            }
+          }
+        }
+      ],
+      "binary_sha256": "29ff8bc2da303823ae7378bc9ebf89a7e70b729cb614ccde357004eb16b5279e",
+      "fourth_reason": {
+        "noisy_over_3pct": false,
+        "within_1_5pct_of_baseline": false
+      },
+      "medians": {
+        "decode_tps": 36.0269857492896,
+        "prefill_tps": 1327.5451604654543,
+        "ttft_ms": 957.6798,
+        "proposal_ms": 1376.4670996069908,
+        "dependency_bound_verify_ms": 12359.635800540447,
+        "mtp_only_cycle_ms": 14099.02479928732,
+        "all_speculative_cycle_ms": 14171.82920062542,
+        "rollback_ms": 286.9818003177643,
+        "wddm_gib": 86.6284294128418
+      },
+      "shape_medians": {
+        "2": {
+          "count": 132,
+          "total_ms": 5930.038600385189,
+          "ms_per_round": 44.924534851402946,
+          "flag_wait_ms": 5361.65120023489,
+          "ple_wait_ms": 74.88640034198761
+        },
+        "3": {
+          "count": 120,
+          "total_ms": 6053.324500381947,
+          "ms_per_round": 50.44437083651622,
+          "flag_wait_ms": 5528.873900294304,
+          "ple_wait_ms": 65.40439993143082
+        }
+      },
+      "median_sync_wait_ms": 1572.5226990580559
+    },
+    "B": {
+      "completed": true,
+      "error": null,
+      "runs": [
+        {
+          "number": 1,
+          "decode_tps": 35.9149276151502,
+          "prefill_tps": 861.9321559512716,
+          "ttft_ms": 1420.2194,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1381.9299996495247,
+          "dependency_bound_verify_ms": 12413.334099948406,
+          "mtp_only_cycle_ms": 14149.640900492668,
+          "all_speculative_cycle_ms": 14217.347499668598,
+          "rollback_ms": 279.6299996972084,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1573.3113996386528,
+            "ms_per_output_token": 3.078887279136307
+          },
+          "graph_captures_all_profiled": 12,
+          "verification_graph_captures": 6,
+          "verification_graph_replays": 506,
+          "path_counters": {
+            "baseline_q4_grouped": 282,
+            "candidate_small_row": 11844,
+            "candidate_rows2": 6204,
+            "candidate_rows3": 5640,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 47,
+            "candidate_small_row": 94,
+            "candidate_rows2": 47,
+            "candidate_rows3": 47,
+            "fallback_other_rows": 47
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.696430206298828,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5948.226000189781,
+              "ms_per_round": 45.06231818325592,
+              "flag_wait_ms": 5376.102200090885,
+              "ple_wait_ms": 62.07489997148514
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6092.049599885941,
+              "ms_per_round": 50.76707999904951,
+              "flag_wait_ms": 5573.639600276947,
+              "ple_wait_ms": 55.112700164318085
+            }
+          }
+        },
+        {
+          "number": 2,
+          "decode_tps": 35.812334871233666,
+          "prefill_tps": 1356.1650214192587,
+          "ttft_ms": 939.1641,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1376.406500339508,
+          "dependency_bound_verify_ms": 12439.751400411129,
+          "mtp_only_cycle_ms": 14181.120799422264,
+          "all_speculative_cycle_ms": 14256.25740045309,
+          "rollback_ms": 290.59180027246475,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1578.1749000549316,
+            "ms_per_output_token": 3.0884048924754044
+          },
+          "graph_captures_all_profiled": 12,
+          "verification_graph_captures": 10,
+          "verification_graph_replays": 516,
+          "path_counters": {
+            "baseline_q4_grouped": 282,
+            "candidate_small_row": 11844,
+            "candidate_rows2": 6204,
+            "candidate_rows3": 5640,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 141,
+            "candidate_small_row": 94,
+            "candidate_rows2": 47,
+            "candidate_rows3": 47,
+            "fallback_other_rows": 141
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.7290802001953125,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5950.439199924469,
+              "ms_per_round": 45.07908484791265,
+              "flag_wait_ms": 5389.888700127602,
+              "ple_wait_ms": 65.47179979085922
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6103.659600496292,
+              "ms_per_round": 50.86383000413577,
+              "flag_wait_ms": 5580.876200199127,
+              "ple_wait_ms": 58.51789975166321
+            }
+          }
+        },
+        {
+          "number": 3,
+          "decode_tps": 35.714619446786415,
+          "prefill_tps": 1340.9502376244393,
+          "ttft_ms": 951.4272,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1375.8626003861427,
+          "dependency_bound_verify_ms": 12485.353599488735,
+          "mtp_only_cycle_ms": 14222.485800147057,
+          "all_speculative_cycle_ms": 14296.703201591969,
+          "rollback_ms": 288.01010024547577,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1576.6622004508972,
+            "ms_per_output_token": 3.0854446192776854
+          },
+          "graph_captures_all_profiled": 10,
+          "verification_graph_captures": 10,
+          "verification_graph_replays": 516,
+          "path_counters": {
+            "baseline_q4_grouped": 282,
+            "candidate_small_row": 11844,
+            "candidate_rows2": 6204,
+            "candidate_rows3": 5640,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 141,
+            "candidate_small_row": 94,
+            "candidate_rows2": 47,
+            "candidate_rows3": 47,
+            "fallback_other_rows": 141
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.742938995361328,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5961.022899627686,
+              "ms_per_round": 45.15926439111883,
+              "flag_wait_ms": 5387.693699657917,
+              "ple_wait_ms": 82.07740068435669
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6138.801799893379,
+              "ms_per_round": 51.15668166577816,
+              "flag_wait_ms": 5591.749599575996,
+              "ple_wait_ms": 79.72420001029968
+            }
+          }
+        },
+        {
+          "number": 4,
+          "decode_tps": 35.7334818466255,
+          "prefill_tps": 1325.9091525744718,
+          "ttft_ms": 957.2244,
+          "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+          "mtp_drafted": 391,
+          "mtp_accepted": 253,
+          "mtp_acceptance": 0.6470588235294118,
+          "mtp_only_accepted_per_output": 0.49607843137254903,
+          "mtp_output_tokens": 510,
+          "lookup_drafted": 6,
+          "lookup_accepted": 0,
+          "lookup_cycles": 1,
+          "proposal_ms": 1380.7694999575615,
+          "dependency_bound_verify_ms": 12471.691799521446,
+          "mtp_only_cycle_ms": 14214.776099264622,
+          "all_speculative_cycle_ms": 14288.034399926662,
+          "rollback_ms": 285.84459990262985,
+          "sync": {
+            "stream_syncs": 361,
+            "device_syncs": 0,
+            "event_syncs": 0,
+            "wait_ms": 1578.26869982481,
+            "ms_per_output_token": 3.0885884536689043
+          },
+          "graph_captures_all_profiled": 10,
+          "verification_graph_captures": 10,
+          "verification_graph_replays": 516,
+          "path_counters": {
+            "baseline_q4_grouped": 282,
+            "candidate_small_row": 11844,
+            "candidate_rows2": 6204,
+            "candidate_rows3": 5640,
+            "fallback_other_rows": 282
+          },
+          "capture_host_path_counters": {
+            "baseline_q4_grouped": 141,
+            "candidate_small_row": 94,
+            "candidate_rows2": 47,
+            "candidate_rows3": 47,
+            "fallback_other_rows": 141
+          },
+          "missing_graph_template": 0,
+          "overflow": 0,
+          "wddm_gib": 86.6284294128418,
+          "host_available_gib": 6.7105560302734375,
+          "target_load_count": 1,
+          "mtp_load_count": 1,
+          "rounds": {
+            "2": {
+              "count": 132,
+              "total_ms": 5983.856099843979,
+              "ms_per_round": 45.332243180636205,
+              "flag_wait_ms": 5395.708399772644,
+              "ple_wait_ms": 79.53510028123856
+            },
+            "3": {
+              "count": 120,
+              "total_ms": 6105.992499709129,
+              "ms_per_round": 50.88327083090941,
+              "flag_wait_ms": 5584.27749979496,
+              "ple_wait_ms": 71.57669997215271
+            }
+          }
+        }
+      ],
+      "binary_sha256": "29ff8bc2da303823ae7378bc9ebf89a7e70b729cb614ccde357004eb16b5279e",
+      "fourth_reason": {
+        "noisy_over_3pct": false,
+        "within_1_5pct_of_baseline": true
+      },
+      "medians": {
+        "decode_tps": 35.772908358929584,
+        "prefill_tps": 1333.4296950994556,
+        "ttft_ms": 954.3258,
+        "proposal_ms": 1378.5880001485348,
+        "dependency_bound_verify_ms": 12455.721599966288,
+        "mtp_only_cycle_ms": 14197.948449343443,
+        "all_speculative_cycle_ms": 14272.145900189877,
+        "rollback_ms": 286.9273500740528,
+        "wddm_gib": 86.6284294128418
+      },
+      "shape_medians": {
+        "2": {
+          "count": 132.0,
+          "total_ms": 5955.731049776077,
+          "ms_per_round": 45.11917461951574,
+          "flag_wait_ms": 5388.791199892759,
+          "ple_wait_ms": 72.50345003604889
+        },
+        "3": {
+          "count": 120.0,
+          "total_ms": 6104.826050102711,
+          "ms_per_round": 50.873550417522594,
+          "flag_wait_ms": 5582.576849997044,
+          "ple_wait_ms": 65.04729986190796
+        }
+      },
+      "median_sync_wait_ms": 1577.4185502529144
+    }
+  },
+  "timing_contract": "DEPENDENCY-BOUND GRAPH COMPLETION WALL TIME; existing Windows steady_clock (QPC implementation); no added HIP event measurements",
+  "math_test_log": "Q4_K rows1/2/3 exact scalar/SwiGLU, guards, nonfinite, routing, graph replay PASS candidate=0\nQ4_K rows1/2/3 exact scalar/SwiGLU, guards, nonfinite, routing, graph replay PASS candidate=1\ncandidate2=4 candidate3=4\n",
+  "incomplete_baseline_attempt": "incomplete-A/A.json: first two correct baseline requests; third returned HTTP400 near host guard. Error body was not captured; exact reason unproven. Excluded from complete A/B medians.",
+  "gain_pct": -0.7052418765425728,
+  "shape_gain_pct": {
+    "2": -0.4313903562158772,
+    "3": -0.84362026531285
+  },
+  "checks": {
+    "A_and_B_completed": true,
+    "same_binary": true,
+    "hashes": true,
+    "speculation": true,
+    "sync_counts": true,
+    "round_counts": true,
+    "candidate_executed": true,
+    "baseline_selected": true,
+    "other_shapes_fallback": true,
+    "counter_templates": true,
+    "no_model_reload": true,
+    "bounded_wddm": true
+  }
+}

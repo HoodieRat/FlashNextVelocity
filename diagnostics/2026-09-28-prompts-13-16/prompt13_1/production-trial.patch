@@ -1,0 +1,307 @@
+--- a/src/native/bench_profile.hpp
++++ b/src/native/bench_profile.hpp
+@@ -2,6 +2,8 @@
+ 
+ // Benchmark-only decode profile. Counters stay off during normal API calls.
+ // HIP event recording lives next to the kernels; this header only stores totals.
++
++#include "hip_timer_contract.hpp"
+ 
+ #include <algorithm>
+ #include <atomic>
+@@ -510,11 +512,13 @@
+ }
+ 
+ template <class Stream, class Fn>
+-inline auto TimedStreamSync(Stream stream, Fn sync) -> decltype(sync(stream)) {
++inline auto TimedStreamSync(Stream stream, Fn sync, int contract_reason = 0) -> decltype(sync(stream)) {
+   if (!OnDecode()) return sync(stream);
+   const double t0 = NowMs();
+   auto err = sync(stream);
+-  AddStreamSync(NowMs() - t0);
++  const double ms=NowMs()-t0;
++  AddStreamSync(ms);
++  fnvcontract::NoteSync(contract_reason,ms);
+   return err;
+ }
+ 
+--- /dev/null
++++ b/src/native/hip_timer_contract.hpp
+@@ -0,0 +1,72 @@
++#pragma once
++#include <array>
++#include <cmath>
++#include <cstdlib>
++#include <cstdint>
++#include <windows.h>
++// Windows UI macro collides with the existing sampler DrawState type.
++#ifdef DrawState
++#undef DrawState
++#endif
++#include "src/core/json.hpp"
++
++// Local whole-replay diagnostic only. No internal graph events or extra waits.
++namespace fnvcontract {
++using gufo::json::Value;
++inline double Qpc() {
++  LARGE_INTEGER t,f;QueryPerformanceCounter(&t);QueryPerformanceFrequency(&f);
++  return 1000.0*static_cast<double>(t.QuadPart)/static_cast<double>(f.QuadPart);
++}
++struct Sample {
++  std::uint64_t key{}; int start_record{-1},stop_record{-1},start_query{-1},stop_query{-1},elapsed_status{-1};
++  unsigned query_not_ready{},elapsed_not_ready{};
++  double raw_ms{},launch_host_ms{},completion_wall_ms{}; bool finite{},positive{},consumed{};
++};
++struct Round { unsigned rows{},replays{},captures{};double completion_wall_ms{},flag_wait_ms{},ple_wait_ms{}; };
++struct State {
++  int runtime_version{},runtime_status{-1},create_status{};char loaded_module[MAX_PATH]{};
++  bool on{};unsigned samples{},rounds{},overflow{},pending{},peak{},created{};
++  std::array<Sample,1024> sample{};std::array<Round,512> round{};
++  std::array<unsigned,3> sync_count{};std::array<double,3> sync_ms{};
++};
++inline State state;
++inline void (*Prepare)()=nullptr;
++inline void (*Collect)()=nullptr;
++inline void (*Finish)()=nullptr;
++inline bool Active(){return state.on;}
++inline void Begin() {
++  state={};const char* e=std::getenv("FNV_HIP_TIMER_CONTRACT");
++  state.on=e && std::string_view(e)=="1";
++  if(state.on && Prepare)Prepare();
++}
++inline void NoteSync(int reason,double ms){if(Active()){++state.sync_count[reason];state.sync_ms[reason]+=ms;}}
++inline Value Json() {
++  Value j=Value::object();j["enabled"]=state.on;
++  if(!Active())return j;
++  auto num=[](unsigned n){return Value(static_cast<unsigned long long>(n));};
++  j["runtime_version"]=state.runtime_version;j["runtime_status"]=state.runtime_status;j["loaded_module"]=state.loaded_module;j["create_status"]=state.create_status;
++  j["contract"]="DEPENDENCY-BOUND GRAPH COMPLETION WALL TIME";
++  j["gpu_timer_lifecycle"]="standard events; same stream; both events queried after existing completion; consumed before reuse; no added synchronization";
++  j["events_created_lifetime"]=num(state.created);j["pending_end"]=num(state.pending);
++  j["pending_peak"]=num(state.peak);j["overflow"]=num(state.overflow);
++  Value a=Value::array();unsigned valid=0;double total=0;
++  for(unsigned i=0;i<state.samples;++i){auto& s=state.sample[i];Value x=Value::object();
++    x["key"]=static_cast<unsigned long long>(s.key);x["rows"]=static_cast<unsigned long long>(s.key&65535);
++    x["piece"]=(s.key&(1ULL<<35))?"prefix":"suffix";
++    x["query_not_ready_count"]=num(s.query_not_ready);x["elapsed_not_ready_count"]=num(s.elapsed_not_ready);
++    x["start_record"]=s.start_record;x["stop_record"]=s.stop_record;x["start_query"]=s.start_query;x["stop_query"]=s.stop_query;x["elapsed_status"]=s.elapsed_status;
++    x["raw_elapsed_ms"]=s.finite?Value(s.raw_ms):Value();x["positive"]=s.positive;x["consumed"]=s.consumed;
++    x["launch_host_ms"]=s.launch_host_ms;x["dependency_completion_wall_ms"]=s.completion_wall_ms;
++    const bool ok=s.consumed && s.start_record==0 && s.stop_record==0 && s.start_query==0 && s.stop_query==0 && s.elapsed_status==0 && s.finite && s.positive;
++    x["valid_api_sample"]=ok;if(ok){++valid;total+=s.raw_ms;}a.push_back(x);
++  }
++  j["samples"]=a;j["replays"]=num(state.samples);j["valid_api_samples"]=num(valid);
++  j["complete_gpu_ms"]=valid==state.samples && !state.overflow ? Value(total):Value();
++  a=Value::array();for(unsigned i=0;i<state.rounds;++i){auto& r=state.round[i];Value x=Value::object();
++    x["rows"]=num(r.rows);x["replays"]=num(r.replays);x["captures"]=num(r.captures);x["dependency_completion_wall_ms"]=r.completion_wall_ms;x["flag_wait_ms"]=r.flag_wait_ms;x["ple_wait_ms"]=r.ple_wait_ms;a.push_back(x);}
++  j["rounds"]=a;a=Value::array();const char* names[]={"other existing stream sync","MTP chain D2H readiness","rollback frontier dependency"};
++  for(unsigned i=0;i<3;++i){Value x=Value::object();x["reason"]=names[i];x["count"]=num(state.sync_count[i]);x["host_ms"]=state.sync_ms[i];a.push_back(x);}j["sync"]=a;
++  j["overlap_note"]="Prefix and suffix launch-to-completion intervals overlap. Use the one-per-verification round intervals for additive attribution. GPU spans overlap host waits; do not add them.";
++  return j;
++}
++}
+--- /dev/null
++++ b/src/native/hip_timer_contract_hip.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++namespace fnvcontract {
++struct Slot{hipEvent_t start{},stop{};int sample{-1};double launch_start{};};
++inline std::array<Slot,8> pool{};
++inline unsigned created=0;inline bool ready=false,broken=false;
++inline void CollectEvents(){
++  if(!Active())return;
++  unsigned pending=0;
++  for(auto& p:pool){if(p.sample==-1)continue;
++    if(p.sample==-2){if(hipEventQuery(p.start)==hipSuccess && hipEventQuery(p.stop)==hipSuccess){float ignored; if(hipEventElapsedTime(&ignored,p.start,p.stop)!=hipErrorNotReady)p.sample=-1;}continue;}
++    auto& s=state.sample[p.sample];
++    const auto b=hipEventQuery(p.start),e=hipEventQuery(p.stop);
++    s.start_query=static_cast<int>(b);s.stop_query=static_cast<int>(e);
++    if(b==hipErrorNotReady || e==hipErrorNotReady){++s.query_not_ready;++pending;continue;}
++    float ms=std::numeric_limits<float>::quiet_NaN();
++    auto status=hipEventElapsedTime(&ms,p.start,p.stop);s.elapsed_status=static_cast<int>(status);
++    if(status==hipErrorNotReady){++s.elapsed_not_ready;++pending;continue;}
++    s.raw_ms=ms;s.finite=std::isfinite(ms);s.positive=ms>0;s.consumed=true;p.sample=-1;
++  }
++  state.pending=pending;
++}
++inline void PrepareEvents(){
++  state.runtime_status=static_cast<int>(hipRuntimeGetVersion(&state.runtime_version));
++  GetModuleFileNameA(GetModuleHandleA("amdhip64_7.dll"),state.loaded_module,MAX_PATH);
++  if(!ready && !broken){for(auto& p:pool){
++    auto x=hipEventCreateWithFlags(&p.start,hipEventDefault);
++    if(x!=hipSuccess){state.create_status=x;broken=true;break;}++created;
++    x=hipEventCreateWithFlags(&p.stop,hipEventDefault);
++    if(x!=hipSuccess){state.create_status=x;broken=true;break;}++created;
++  }ready=!broken;}
++  state.created=created;
++}
++inline void Complete(){
++  const double now=Qpc();
++  // Completion is an existing dependency; timestamp before querying timers.
++  for(auto& p:pool)if(p.sample>=0 && state.sample[p.sample].completion_wall_ms==0)
++    state.sample[p.sample].completion_wall_ms=now-p.launch_start;
++  CollectEvents();
++}
++inline void FinishEvents(){Complete();for(auto& p:pool)if(p.sample>=0)p.sample=-2;}
++inline void ReleaseEvents(){for(auto& p:pool){if(p.start)(void)hipEventDestroy(p.start);if(p.stop)(void)hipEventDestroy(p.stop);p={};}ready=false;created=0;}
++struct Replay{
++  Slot* slot{};int sample{-1};double start{};
++  Replay(hipStream_t stream,std::uint64_t key){
++    if(!Active() || !(key&(1ULL<<32)) || (key&(1ULL<<40)))return;
++    if(!ready || state.samples>=state.sample.size()){++state.overflow;return;}
++    for(auto& p:pool)if(p.sample==-1){slot=&p;break;}
++    if(!slot){++state.overflow;return;}
++    sample=static_cast<int>(state.samples++);slot->sample=sample;
++    auto& s=state.sample[sample];s.key=key;
++    s.start_record=static_cast<int>(hipEventRecord(slot->start,stream));
++    start=Qpc();slot->launch_start=start;
++  }
++  void End(hipStream_t stream){if(!slot)return;auto& s=state.sample[sample];
++    s.launch_host_ms=Qpc()-start;s.stop_record=static_cast<int>(hipEventRecord(slot->stop,stream));
++    unsigned n=0;for(auto& p:pool)n+=p.sample>=0;state.peak=std::max(state.peak,n);
++  }
++};
++struct Install{Install(){Prepare=PrepareEvents;Collect=Complete;Finish=FinishEvents;}};
++inline Install install;
++}
+--- a/src/native/main.cpp
++++ b/src/native/main.cpp
+@@ -118,6 +118,7 @@
+ };
+ 
+ struct Metrics {
++  Value hip_timer_contract;
+   LookupPolicy lookup_policy{};
+   std::uint32_t lookup_capacity{0};
+   std::uint64_t prompt_tokens{0};
+@@ -1170,6 +1171,7 @@
+ 
+ Value MetricsJson(const Metrics& m) {
+   Value v = Value::object();
++  if (!m.hip_timer_contract.is_null()) v["hip_timer_contract"] = m.hip_timer_contract;
+   v["prompt_tokens"] = static_cast<unsigned long long>(m.prompt_tokens);
+   v["completion_tokens"] = static_cast<unsigned long long>(m.completion_tokens);
+   v["max_tokens_requested"] = static_cast<unsigned long long>(m.requested_max_tokens);
+@@ -1585,22 +1587,25 @@
+                   std::int64_t requested_seed = -1,
+                   bool stream = false,
+                   LookupMode lookup_mode = LookupMode::kSticky) {
++    std::lock_guard generation_lock(generation_mutex_);
+     struct ProfileGuard {
+       bool on{false};
+       explicit ProfileGuard(bool enable) : on(enable) {
+         if (!on) return;
+         fnvprof::Reset();
++        fnvcontract::Begin();
+         qfn_q8_shallow_reset();
+         fnvprof::SetEnabled(true);
+         fnvprof::SetPhase(fnvprof::Phase::Prefill);
+       }
+       ~ProfileGuard() {
+         if (!on) return;
++        if(fnvcontract::Active() && fnvcontract::Finish)fnvcontract::Finish();
+         fnvprof::SetPhase(fnvprof::Phase::Off);
+         fnvprof::SetEnabled(false);
++        fnvcontract::state.on=false;
+       }
+     } profile_guard(profile);
+-    std::lock_guard generation_lock(generation_mutex_);
+     CheckMemoryFloor("request start");
+     if (!session_->IsValid()) {
+       std::string error;
+@@ -1811,6 +1816,10 @@
+     m.speed_windows = std::move(windows);
+     m.has_request = true;
+     if (profile) {
++      if(fnvcontract::Active()) {
++        if(fnvcontract::Finish)fnvcontract::Finish();
++        m.hip_timer_contract=fnvcontract::Json();
++      }
+       fnvprof::SetPhase(fnvprof::Phase::Off);
+       m.profile = fnvprof::BuildReport(m.decode_ms);
+       LogDeviceMemory("after profiled request");
+--- a/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
+@@ -1,6 +1,8 @@
+ #include "src/models/qwen38_flash_next/kernels/rocm/executor.hpp"
+ 
+ #include "bench_profile.hpp"
++#include <limits>
++#include "hip_timer_contract_hip.hpp"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -530,6 +532,7 @@
+ }
+ 
+ Executor::~Executor() {
++  fnvcontract::ReleaseEvents();
+   // Readers write pinned staging memory; drain them before freeing it,
+   // including when a forward failed before reaching PLE.
+   if (ple_pending_) {
+@@ -2227,7 +2230,10 @@
+       }
+       session.graphs_.emplace(key, exec);
+     }
+-    if (!Check(hipGraphLaunch(exec, stream_), "graph launch", error_msg)) {
++    fnvcontract::Replay timer(stream_,key);
++    const auto launch_status=hipGraphLaunch(exec,stream_);
++    timer.End(stream_);
++    if (!Check(launch_status, "graph launch", error_msg)) {
+       return false;
+     }
+     return finish(synchronize);
+@@ -2382,6 +2388,11 @@
+                             (static_cast<std::uint64_t>(download_logits) << 34) |
+                             (compact_key << 37) |
+                             (fnvprof::OnDecode() ? fnvprof::kProfileGraphBit : 0);
++  const bool contract=speculative && fnvcontract::Active() && fnvprof::OnDecode();
++  const double contract_start=contract ? fnvcontract::Qpc() : 0;
++  const double contract_ple=contract ? fnvprof::S().ple_wait_ms : 0;
++  const auto contract_replays=fnvcontract::state.samples;
++  const auto contract_captures=fnvprof::S().graph_captures;
+   // PLE first consumes the disk rows at its injection layer. Queue the
+   // preceding layers before waiting, including on captured graph replay.
+   // Both pieces use the same stream and arithmetic as the unsplit graph.
+@@ -2412,9 +2423,20 @@
+     return false;
+   }
+   const bool flag_wait = graph && done_flag_ != nullptr;
+-  if (!Run(session, key, graph, body, error_msg, !flag_wait) ||
+-      (flag_wait && !Wait("forward", error_msg))) {
+-    return false;
++  const bool forward_ok=Run(session, key, graph, body, error_msg, !flag_wait);
++  const double contract_wait_start=contract ? fnvcontract::Qpc() : 0;
++  if (!forward_ok || (flag_wait && !Wait("forward", error_msg))) {
++    return false;
++  }
++  if(contract) {
++    const double done=fnvcontract::Qpc();
++    auto& c=fnvcontract::state;
++    if(c.rounds<c.round.size())c.round[c.rounds++]={n,c.samples-contract_replays,
++      static_cast<unsigned>(fnvprof::S().graph_captures-contract_captures),
++      done-contract_start,flag_wait ? done-contract_wait_start : 0,
++      fnvprof::S().ple_wait_ms-contract_ple};
++    else ++c.overflow;
++    if(fnvcontract::Collect)fnvcontract::Collect();
+   }
+   if (speculative) {
+     // Decode graphs replay without executing ForwardBody on the host, so the
+@@ -2780,7 +2802,7 @@
+   if (logits == nullptr) {
+     return true;
+   }
+-  if (!Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize),
++  if (!Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize, 2),
+              "rollback frontier", error_msg)) {
+     return false;
+   }
+@@ -3290,7 +3312,7 @@
+   if (!Check(hipMemcpyAsync(mtp_chain_host_, s_.mtp_chain_tokens,
+                             drafts.size_bytes(), hipMemcpyDeviceToHost, stream_),
+              "async MTP chain download", error_msg) ||
+-      !Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize),
++      !Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize, 1),
+              "async MTP chain", error_msg)) {
+     return false;
+   }

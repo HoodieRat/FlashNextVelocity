@@ -1,0 +1,2 @@
+PASS shared-down Q8_0 M=2560 K=640 N=2 baseline/candidate/MMVQ/fallback bitwise; graph dispatch identities; zero/small/ordinary mutated replay; prepared bytes and output guards
+PASS shared-down Q8_0 M=2560 K=640 N=3 baseline/candidate/MMVQ/fallback bitwise; graph dispatch identities; zero/small/ordinary mutated replay; prepared bytes and output guards

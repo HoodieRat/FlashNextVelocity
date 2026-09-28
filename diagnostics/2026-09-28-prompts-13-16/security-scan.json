@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "text_files_scanned": 39,
+  "bytes_scanned": 10766589,
+  "rules": [
+    "OpenAI-style key",
+    "GitHub token",
+    "AWS access key",
+    "Google API key",
+    "Slack token",
+    "Private key",
+    "JWT",
+    "Bearer credential",
+    "Credential assignment",
+    "Credential URL"
+  ],
+  "findings": [],
+  "scope": "Every new uploaded diagnostic file; allowlist excludes environment, credential and binary files. Pattern scan is not a guarantee against every possible secret format."
+}

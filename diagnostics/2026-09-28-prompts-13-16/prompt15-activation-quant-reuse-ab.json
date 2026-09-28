@@ -1,0 +1,3854 @@
+{
+  "task": "Prompt 15: Q4_K activation quantization reuse for 2/3-row verification",
+  "status": "PASS",
+  "decision": "OPTIMIZATION EVALUATED AND REJECTED",
+  "starting_head": "b58deeb81e19b250222fe259d223339c8634543a",
+  "final_head": "b58deeb81e19b250222fe259d223339c8634543a",
+  "commit": null,
+  "rollback_branch": "backup/pre-prompt15-activation-quant-reuse",
+  "remote_contacted": false,
+  "remote_updated": false,
+  "remote_confirmation": "No network/GitHub operation performed. Local refs/config match post-rollback-branch snapshot. origin/main and production-qualified-2026-09-27 absent locally before/after; no remote readback claimed. Frozen backup untouched by this task.",
+  "production_configuration_changed": false,
+  "config": {
+    "model": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+    "mtp": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\MTP\\mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+    "mmproj": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\mmproj-F16.gguf",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "context": 131117,
+    "draft_max": 6,
+    "draft_confidence": 0,
+    "mtp_draft_vocabulary": "latin",
+    "mtp_proposal_mode": "halo_greedy",
+    "prefill_batch": 2432,
+    "context_lookup": true,
+    "context_lookup_min_ngram": 3,
+    "context_lookup_max_ngram": 6,
+    "context_lookup_window": 32768,
+    "context_lookup_min_draft": 6,
+    "context_lookup_max_draft": 16,
+    "context_lookup_policy": "sticky",
+    "context_lookup_capacity": 16,
+    "memory_guard": true,
+    "memory_guard_min_available_gib": 5,
+    "sessions": 1,
+    "default_max_tokens": 65000,
+    "thinking": false,
+    "preserve_thinking": false,
+    "reasoning_effort": "medium",
+    "sampling": {
+      "temperature": 0.35,
+      "top_p": 0.9,
+      "top_k": 40,
+      "min_p": 0.05,
+      "repeat_penalty": 1.05,
+      "frequency_penalty": 0,
+      "presence_penalty": 0,
+      "repeat_last_n": 512,
+      "seed": -1
+    }
+  },
+  "runtime": {
+    "hip": "7.15.26333",
+    "therock": "10.0.0rc4",
+    "target": "gfx1151",
+    "compiler": "AMD clang23/MSVC14.44 via scripts/build.ps1",
+    "hip_runtime_sha256": "546fb3d6e2d2194a9526fb94ec2fd3aa5b92a48a7595f04efece80162047ef69"
+  },
+  "redundancy_found": true,
+  "redundancy_proof": {
+    "scope": "47 Q4_K routed gate/up layers and their compatible shared-expert input, per 2/3-row verification round",
+    "source_dtype": "FP32",
+    "prepared_dtype": "row-major block_q8_1, 32 int8 + half2(d,sum(x)), 36 bytes/block",
+    "source_width": 2560,
+    "blocks_per_row": 80,
+    "bytes_per_row": 2880,
+    "quantizer": "quantize_row_q8_1_hip -> quantize_q8_1",
+    "math": "Original maxabs and sum reduction; d=maxabs/127; q=roundf(x/d) or zero; FP16 scale/sum stored. No arithmetic changes.",
+    "per_shape": {
+      "2": {
+        "unique_batches": 47,
+        "unique_rows": 94,
+        "baseline_compatible_preparation_launches": 94,
+        "baseline_prepared_row_instances": 188,
+        "minimum_launches": 47,
+        "redundant_launches": 47,
+        "candidate_avoided_launches": 47,
+        "prefix_saved": 1,
+        "suffix_saved": 46
+      },
+      "3": {
+        "unique_batches": 47,
+        "unique_rows": 141,
+        "baseline_compatible_preparation_launches": 94,
+        "baseline_prepared_row_instances": 282,
+        "minimum_launches": 47,
+        "redundant_launches": 47,
+        "candidate_avoided_launches": 47,
+        "prefix_saved": 1,
+        "suffix_saved": 46
+      }
+    },
+    "lifetime": "One Moe invocation. Shared GatedDense returns Q8Input in existing alternating slot. One shared-down Quantize writes opposite slot. Routed Q4 consumer reads first slot on same stream before next overwrite. Capture cursor alternation unchanged.",
+    "baseline_scope": "Routed operation already quantizes once for both gate/up and all experts. Duplicate is earlier shared-expert preparation of identical x. Router consumes float; shared-down consumes different tensor; Q5 layer2 excluded.",
+    "evidence": "graph-audit.json stores every eligible node; source dataflow proves identical x because saved topology has no kernel argument values.",
+    "candidate": "Explicit prepared-input API; original grouped gate/up dispatch untouched; pool group scratch only, no extra buffers/copies/sync. Row2/3 Q4 verification gate; all other paths baseline."
+  },
+  "graph_audit": {
+    "task": "Prompt 15 read-only graph/source redundancy audit",
+    "graph_evidence": "<workspace>\\benchmarks\\prompt13_2-verification-graph-topology.json",
+    "graph_evidence_sha256": "c0344800dadffb3ea28abe3dbc496447fdb4e44a072b40d976194eea634f276e",
+    "counts_scope": "Q4_K grouped routed MoE gate/up plus its already prepared compatible shared-expert input; excludes Q5 layer2 and all other activation tensors",
+    "graphs": [
+      {
+        "rows": 2,
+        "piece": "prefix",
+        "key": 244813266946,
+        "node_count": 39,
+        "total_quantize_q8_1_nodes": 10,
+        "eligible_layers": 1,
+        "eligible_layer_data": [
+          {
+            "layer": 0,
+            "shared_preparation_node": 28,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 32,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 30,
+            "group_slots_node": 33,
+            "routed_gate_up_nodes": [
+              34
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          }
+        ],
+        "excluded_layers": [],
+        "current_compatible_preparation_launches": 2,
+        "minimum_compatible_preparation_launches": 1,
+        "expected_candidate_node_reduction": 1,
+        "expected_candidate_node_count": 38
+      },
+      {
+        "rows": 2,
+        "piece": "suffix",
+        "key": 210453528578,
+        "node_count": 1690,
+        "total_quantize_q8_1_nodes": 474,
+        "eligible_layers": 46,
+        "eligible_layer_data": [
+          {
+            "layer": 1,
+            "shared_preparation_node": 38,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 42,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 40,
+            "group_slots_node": 43,
+            "routed_gate_up_nodes": [
+              44
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 3,
+            "shared_preparation_node": 109,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 113,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 111,
+            "group_slots_node": 114,
+            "routed_gate_up_nodes": [
+              115
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 4,
+            "shared_preparation_node": 144,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 148,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 146,
+            "group_slots_node": 149,
+            "routed_gate_up_nodes": [
+              150
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 5,
+            "shared_preparation_node": 179,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 183,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 181,
+            "group_slots_node": 184,
+            "routed_gate_up_nodes": [
+              185
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 6,
+            "shared_preparation_node": 214,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 218,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 216,
+            "group_slots_node": 219,
+            "routed_gate_up_nodes": [
+              220
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 7,
+            "shared_preparation_node": 250,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 254,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 252,
+            "group_slots_node": 255,
+            "routed_gate_up_nodes": [
+              256
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 8,
+            "shared_preparation_node": 285,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 289,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 287,
+            "group_slots_node": 290,
+            "routed_gate_up_nodes": [
+              291
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 9,
+            "shared_preparation_node": 320,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 324,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 322,
+            "group_slots_node": 325,
+            "routed_gate_up_nodes": [
+              326
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 10,
+            "shared_preparation_node": 355,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 359,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 357,
+            "group_slots_node": 360,
+            "routed_gate_up_nodes": [
+              361
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 11,
+            "shared_preparation_node": 391,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 395,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 393,
+            "group_slots_node": 396,
+            "routed_gate_up_nodes": [
+              397
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 12,
+            "shared_preparation_node": 426,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 430,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 428,
+            "group_slots_node": 431,
+            "routed_gate_up_nodes": [
+              432
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 13,
+            "shared_preparation_node": 461,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 465,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 463,
+            "group_slots_node": 466,
+            "routed_gate_up_nodes": [
+              467
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 14,
+            "shared_preparation_node": 496,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 500,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 498,
+            "group_slots_node": 501,
+            "routed_gate_up_nodes": [
+              502
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 15,
+            "shared_preparation_node": 532,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 536,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 534,
+            "group_slots_node": 537,
+            "routed_gate_up_nodes": [
+              538
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 16,
+            "shared_preparation_node": 567,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 571,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 569,
+            "group_slots_node": 572,
+            "routed_gate_up_nodes": [
+              573
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 17,
+            "shared_preparation_node": 602,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 606,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 604,
+            "group_slots_node": 607,
+            "routed_gate_up_nodes": [
+              608
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 18,
+            "shared_preparation_node": 637,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 641,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 639,
+            "group_slots_node": 642,
+            "routed_gate_up_nodes": [
+              643
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 19,
+            "shared_preparation_node": 673,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 677,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 675,
+            "group_slots_node": 678,
+            "routed_gate_up_nodes": [
+              679
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 20,
+            "shared_preparation_node": 708,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 712,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 710,
+            "group_slots_node": 713,
+            "routed_gate_up_nodes": [
+              714
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 21,
+            "shared_preparation_node": 743,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 747,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 745,
+            "group_slots_node": 748,
+            "routed_gate_up_nodes": [
+              749
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 22,
+            "shared_preparation_node": 778,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 782,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 780,
+            "group_slots_node": 783,
+            "routed_gate_up_nodes": [
+              784
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 23,
+            "shared_preparation_node": 814,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 818,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 816,
+            "group_slots_node": 819,
+            "routed_gate_up_nodes": [
+              820
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 24,
+            "shared_preparation_node": 849,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 853,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 851,
+            "group_slots_node": 854,
+            "routed_gate_up_nodes": [
+              855
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 25,
+            "shared_preparation_node": 884,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 888,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 886,
+            "group_slots_node": 889,
+            "routed_gate_up_nodes": [
+              890
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 26,
+            "shared_preparation_node": 919,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 923,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 921,
+            "group_slots_node": 924,
+            "routed_gate_up_nodes": [
+              925
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 27,
+            "shared_preparation_node": 955,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 959,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 957,
+            "group_slots_node": 960,
+            "routed_gate_up_nodes": [
+              961
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 28,
+            "shared_preparation_node": 990,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 994,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 992,
+            "group_slots_node": 995,
+            "routed_gate_up_nodes": [
+              996
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 29,
+            "shared_preparation_node": 1025,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1029,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1027,
+            "group_slots_node": 1030,
+            "routed_gate_up_nodes": [
+              1031
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 30,
+            "shared_preparation_node": 1060,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1064,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1062,
+            "group_slots_node": 1065,
+            "routed_gate_up_nodes": [
+              1066
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 31,
+            "shared_preparation_node": 1096,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1100,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1098,
+            "group_slots_node": 1101,
+            "routed_gate_up_nodes": [
+              1102
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 32,
+            "shared_preparation_node": 1131,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1135,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1133,
+            "group_slots_node": 1136,
+            "routed_gate_up_nodes": [
+              1137
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 33,
+            "shared_preparation_node": 1166,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1170,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1168,
+            "group_slots_node": 1171,
+            "routed_gate_up_nodes": [
+              1172
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 34,
+            "shared_preparation_node": 1201,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1205,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1203,
+            "group_slots_node": 1206,
+            "routed_gate_up_nodes": [
+              1207
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 35,
+            "shared_preparation_node": 1237,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1241,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1239,
+            "group_slots_node": 1242,
+            "routed_gate_up_nodes": [
+              1243
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 36,
+            "shared_preparation_node": 1272,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1276,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1274,
+            "group_slots_node": 1277,
+            "routed_gate_up_nodes": [
+              1278
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 37,
+            "shared_preparation_node": 1307,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1311,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1309,
+            "group_slots_node": 1312,
+            "routed_gate_up_nodes": [
+              1313
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 38,
+            "shared_preparation_node": 1342,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1346,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1344,
+            "group_slots_node": 1347,
+            "routed_gate_up_nodes": [
+              1348
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 39,
+            "shared_preparation_node": 1378,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1382,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1380,
+            "group_slots_node": 1383,
+            "routed_gate_up_nodes": [
+              1384
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 40,
+            "shared_preparation_node": 1413,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1417,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1415,
+            "group_slots_node": 1418,
+            "routed_gate_up_nodes": [
+              1419
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 41,
+            "shared_preparation_node": 1448,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1452,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1450,
+            "group_slots_node": 1453,
+            "routed_gate_up_nodes": [
+              1454
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 42,
+            "shared_preparation_node": 1483,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1487,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1485,
+            "group_slots_node": 1488,
+            "routed_gate_up_nodes": [
+              1489
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 43,
+            "shared_preparation_node": 1519,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1523,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1521,
+            "group_slots_node": 1524,
+            "routed_gate_up_nodes": [
+              1525
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 44,
+            "shared_preparation_node": 1554,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1558,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1556,
+            "group_slots_node": 1559,
+            "routed_gate_up_nodes": [
+              1560
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 45,
+            "shared_preparation_node": 1589,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1593,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1591,
+            "group_slots_node": 1594,
+            "routed_gate_up_nodes": [
+              1595
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 46,
+            "shared_preparation_node": 1624,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1628,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1626,
+            "group_slots_node": 1629,
+            "routed_gate_up_nodes": [
+              1630
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 47,
+            "shared_preparation_node": 1660,
+            "shared_grid": [
+              10,
+              2,
+              1
+            ],
+            "routed_preparation_node": 1664,
+            "routed_grid": [
+              10,
+              1,
+              2
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1662,
+            "group_slots_node": 1665,
+            "routed_gate_up_nodes": [
+              1666
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 2,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          }
+        ],
+        "excluded_layers": [
+          {
+            "layer": 2,
+            "reason": "Q5_K grouped gate/up, outside candidate",
+            "kernel_symbols": [
+              "void qfn_mmq::mul_mat_vec_moe_grouped<(qfn_mmq::ggml_type)13, 2, false>(void const*, void const*, qfn_mmq::block_q8_1 const*, int const*, float*, int, int, int, int)"
+            ]
+          }
+        ],
+        "current_compatible_preparation_launches": 92,
+        "minimum_compatible_preparation_launches": 46,
+        "expected_candidate_node_reduction": 46,
+        "expected_candidate_node_count": 1644
+      },
+      {
+        "rows": 3,
+        "piece": "prefix",
+        "key": 244813332483,
+        "node_count": 40,
+        "total_quantize_q8_1_nodes": 10,
+        "eligible_layers": 1,
+        "eligible_layer_data": [
+          {
+            "layer": 0,
+            "shared_preparation_node": 28,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 32,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 30,
+            "group_slots_node": 33,
+            "routed_gate_up_nodes": [
+              34,
+              35
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          }
+        ],
+        "excluded_layers": [],
+        "current_compatible_preparation_launches": 2,
+        "minimum_compatible_preparation_launches": 1,
+        "expected_candidate_node_reduction": 1,
+        "expected_candidate_node_count": 39
+      },
+      {
+        "rows": 3,
+        "piece": "suffix",
+        "key": 210453594115,
+        "node_count": 1740,
+        "total_quantize_q8_1_nodes": 474,
+        "eligible_layers": 46,
+        "eligible_layer_data": [
+          {
+            "layer": 1,
+            "shared_preparation_node": 38,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 42,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 40,
+            "group_slots_node": 43,
+            "routed_gate_up_nodes": [
+              44,
+              45
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 3,
+            "shared_preparation_node": 110,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 114,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 112,
+            "group_slots_node": 115,
+            "routed_gate_up_nodes": [
+              116,
+              117
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 4,
+            "shared_preparation_node": 146,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 150,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 148,
+            "group_slots_node": 151,
+            "routed_gate_up_nodes": [
+              152,
+              153
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 5,
+            "shared_preparation_node": 182,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 186,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 184,
+            "group_slots_node": 187,
+            "routed_gate_up_nodes": [
+              188,
+              189
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 6,
+            "shared_preparation_node": 218,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 222,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 220,
+            "group_slots_node": 223,
+            "routed_gate_up_nodes": [
+              224,
+              225
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 7,
+            "shared_preparation_node": 255,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 259,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 257,
+            "group_slots_node": 260,
+            "routed_gate_up_nodes": [
+              261,
+              262
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 8,
+            "shared_preparation_node": 291,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 295,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 293,
+            "group_slots_node": 296,
+            "routed_gate_up_nodes": [
+              297,
+              298
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 9,
+            "shared_preparation_node": 327,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 331,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 329,
+            "group_slots_node": 332,
+            "routed_gate_up_nodes": [
+              333,
+              334
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 10,
+            "shared_preparation_node": 363,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 367,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 365,
+            "group_slots_node": 368,
+            "routed_gate_up_nodes": [
+              369,
+              370
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 11,
+            "shared_preparation_node": 400,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 404,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 402,
+            "group_slots_node": 405,
+            "routed_gate_up_nodes": [
+              406,
+              407
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 12,
+            "shared_preparation_node": 436,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 440,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 438,
+            "group_slots_node": 441,
+            "routed_gate_up_nodes": [
+              442,
+              443
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 13,
+            "shared_preparation_node": 472,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 476,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 474,
+            "group_slots_node": 477,
+            "routed_gate_up_nodes": [
+              478,
+              479
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 14,
+            "shared_preparation_node": 508,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 512,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 510,
+            "group_slots_node": 513,
+            "routed_gate_up_nodes": [
+              514,
+              515
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 15,
+            "shared_preparation_node": 545,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 549,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 547,
+            "group_slots_node": 550,
+            "routed_gate_up_nodes": [
+              551,
+              552
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 16,
+            "shared_preparation_node": 581,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 585,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 583,
+            "group_slots_node": 586,
+            "routed_gate_up_nodes": [
+              587,
+              588
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 17,
+            "shared_preparation_node": 617,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 621,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 619,
+            "group_slots_node": 622,
+            "routed_gate_up_nodes": [
+              623,
+              624
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 18,
+            "shared_preparation_node": 653,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 657,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 655,
+            "group_slots_node": 658,
+            "routed_gate_up_nodes": [
+              659,
+              660
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 19,
+            "shared_preparation_node": 690,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 694,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 692,
+            "group_slots_node": 695,
+            "routed_gate_up_nodes": [
+              696,
+              697
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 20,
+            "shared_preparation_node": 726,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 730,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 728,
+            "group_slots_node": 731,
+            "routed_gate_up_nodes": [
+              732,
+              733
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 21,
+            "shared_preparation_node": 762,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 766,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 764,
+            "group_slots_node": 767,
+            "routed_gate_up_nodes": [
+              768,
+              769
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 22,
+            "shared_preparation_node": 798,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 802,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 800,
+            "group_slots_node": 803,
+            "routed_gate_up_nodes": [
+              804,
+              805
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 23,
+            "shared_preparation_node": 835,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 839,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 837,
+            "group_slots_node": 840,
+            "routed_gate_up_nodes": [
+              841,
+              842
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 24,
+            "shared_preparation_node": 871,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 875,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 873,
+            "group_slots_node": 876,
+            "routed_gate_up_nodes": [
+              877,
+              878
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 25,
+            "shared_preparation_node": 907,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 911,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 909,
+            "group_slots_node": 912,
+            "routed_gate_up_nodes": [
+              913,
+              914
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 26,
+            "shared_preparation_node": 943,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 947,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 945,
+            "group_slots_node": 948,
+            "routed_gate_up_nodes": [
+              949,
+              950
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 27,
+            "shared_preparation_node": 980,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 984,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 982,
+            "group_slots_node": 985,
+            "routed_gate_up_nodes": [
+              986,
+              987
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 28,
+            "shared_preparation_node": 1016,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1020,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1018,
+            "group_slots_node": 1021,
+            "routed_gate_up_nodes": [
+              1022,
+              1023
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 29,
+            "shared_preparation_node": 1052,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1056,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1054,
+            "group_slots_node": 1057,
+            "routed_gate_up_nodes": [
+              1058,
+              1059
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 30,
+            "shared_preparation_node": 1088,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1092,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1090,
+            "group_slots_node": 1093,
+            "routed_gate_up_nodes": [
+              1094,
+              1095
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 31,
+            "shared_preparation_node": 1125,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1129,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1127,
+            "group_slots_node": 1130,
+            "routed_gate_up_nodes": [
+              1131,
+              1132
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 32,
+            "shared_preparation_node": 1161,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1165,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1163,
+            "group_slots_node": 1166,
+            "routed_gate_up_nodes": [
+              1167,
+              1168
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 33,
+            "shared_preparation_node": 1197,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1201,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1199,
+            "group_slots_node": 1202,
+            "routed_gate_up_nodes": [
+              1203,
+              1204
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 34,
+            "shared_preparation_node": 1233,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1237,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1235,
+            "group_slots_node": 1238,
+            "routed_gate_up_nodes": [
+              1239,
+              1240
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 35,
+            "shared_preparation_node": 1270,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1274,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1272,
+            "group_slots_node": 1275,
+            "routed_gate_up_nodes": [
+              1276,
+              1277
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 36,
+            "shared_preparation_node": 1306,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1310,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1308,
+            "group_slots_node": 1311,
+            "routed_gate_up_nodes": [
+              1312,
+              1313
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 37,
+            "shared_preparation_node": 1342,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1346,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1344,
+            "group_slots_node": 1347,
+            "routed_gate_up_nodes": [
+              1348,
+              1349
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 38,
+            "shared_preparation_node": 1378,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1382,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1380,
+            "group_slots_node": 1383,
+            "routed_gate_up_nodes": [
+              1384,
+              1385
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 39,
+            "shared_preparation_node": 1415,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1419,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1417,
+            "group_slots_node": 1420,
+            "routed_gate_up_nodes": [
+              1421,
+              1422
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 40,
+            "shared_preparation_node": 1451,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1455,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1453,
+            "group_slots_node": 1456,
+            "routed_gate_up_nodes": [
+              1457,
+              1458
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 41,
+            "shared_preparation_node": 1487,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1491,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1489,
+            "group_slots_node": 1492,
+            "routed_gate_up_nodes": [
+              1493,
+              1494
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 42,
+            "shared_preparation_node": 1523,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1527,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1525,
+            "group_slots_node": 1528,
+            "routed_gate_up_nodes": [
+              1529,
+              1530
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 43,
+            "shared_preparation_node": 1560,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1564,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1562,
+            "group_slots_node": 1565,
+            "routed_gate_up_nodes": [
+              1566,
+              1567
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 44,
+            "shared_preparation_node": 1596,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1600,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1598,
+            "group_slots_node": 1601,
+            "routed_gate_up_nodes": [
+              1602,
+              1603
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 45,
+            "shared_preparation_node": 1632,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1636,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1634,
+            "group_slots_node": 1637,
+            "routed_gate_up_nodes": [
+              1638,
+              1639
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 46,
+            "shared_preparation_node": 1668,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1672,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1670,
+            "group_slots_node": 1673,
+            "routed_gate_up_nodes": [
+              1674,
+              1675
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          },
+          {
+            "layer": 47,
+            "shared_preparation_node": 1705,
+            "shared_grid": [
+              10,
+              3,
+              1
+            ],
+            "routed_preparation_node": 1709,
+            "routed_grid": [
+              10,
+              1,
+              3
+            ],
+            "quantize_block": [
+              256,
+              1,
+              1
+            ],
+            "intervening_shared_down_preparation_node": 1707,
+            "group_slots_node": 1710,
+            "routed_gate_up_nodes": [
+              1711,
+              1712
+            ],
+            "logical_input_batches": 1,
+            "logical_input_rows": 3,
+            "current_compatible_preparation_launches": 2,
+            "minimum_preparation_launches": 1,
+            "avoidable_routed_preparation_launches": 1
+          }
+        ],
+        "excluded_layers": [
+          {
+            "layer": 2,
+            "reason": "Q5_K grouped gate/up, outside candidate",
+            "kernel_symbols": [
+              "void qfn_mmq::mul_mat_vec_moe_grouped<(qfn_mmq::ggml_type)13, 3, false>(void const*, void const*, qfn_mmq::block_q8_1 const*, int const*, float*, int, int, int, int)"
+            ]
+          }
+        ],
+        "current_compatible_preparation_launches": 92,
+        "minimum_compatible_preparation_launches": 46,
+        "expected_candidate_node_reduction": 46,
+        "expected_candidate_node_count": 1694
+      }
+    ],
+    "whole_round": [
+      {
+        "rows": 2,
+        "q4_layers": 47,
+        "unique_logical_input_batches": 47,
+        "unique_logical_input_rows": 94,
+        "current_compatible_preparation_launches": 94,
+        "current_prepared_row_instances": 188,
+        "minimum_preparation_launches": 47,
+        "minimum_prepared_row_instances": 94,
+        "avoidable_launches": 47,
+        "avoidable_row_instances": 94,
+        "routed_only_current_preparations": 47,
+        "routed_only_internal_duplicates": 0,
+        "all_quantize_nodes_before": 484,
+        "all_quantize_nodes_expected_after": 437
+      },
+      {
+        "rows": 3,
+        "q4_layers": 47,
+        "unique_logical_input_batches": 47,
+        "unique_logical_input_rows": 141,
+        "current_compatible_preparation_launches": 94,
+        "current_prepared_row_instances": 282,
+        "minimum_preparation_launches": 47,
+        "minimum_prepared_row_instances": 141,
+        "avoidable_launches": 47,
+        "avoidable_row_instances": 141,
+        "routed_only_current_preparations": 47,
+        "routed_only_internal_duplicates": 0,
+        "all_quantize_nodes_before": 484,
+        "all_quantize_nodes_expected_after": 437
+      }
+    ],
+    "source_proof": [
+      {
+        "file": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp",
+        "lines": [
+          1054,
+          1063,
+          1065,
+          1066,
+          1094,
+          1103,
+          1104,
+          1954,
+          1966,
+          1989,
+          2077
+        ],
+        "proof": "Moe passes identical const float* x and n_tokens to shared GatedDense and later MoeExperts/GatedExperts. Shared Q8 GatedDense prepares x once. Intervening shared down projection prepares s_.shexp_up into the alternate q8 slot. Two alternating slots preserve the earlier x preparation through one subsequent Quantize. The routed wrapper then currently quantizes x again. Router is SmallGemm float-input and contributes no quantize node in these graph ranges."
+      },
+      {
+        "file": "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.hip.cpp",
+        "lines": [
+          419,
+          420,
+          431,
+          537,
+          543,
+          548
+        ],
+        "proof": "Routed wrapper uses K strides with ne1=1, ne2=n_tokens. Public preparation uses ne1=n_tokens, ne2=1 with same padded K. Both call quantize_row_q8_1_hip. One routed quantized buffer is already shared by both gate/up weights and all expert IDs."
+      },
+      {
+        "file": "<pinned-gufo>\\src\\models\\qwen38_flash_next\\kernels\\rocm\\mmq\\quantize.hip.cpp",
+        "lines": [
+          7,
+          17,
+          26,
+          33,
+          37,
+          40,
+          41,
+          43,
+          49,
+          150,
+          160,
+          162,
+          163
+        ],
+        "proof": "Flattened source is row*K+i0 and output is row*paddedK+i0 for either y-row or z-row grid orientation. Quantization is same 32-lane max/sum, d=amax/127, roundf(x/d), int8 values, half2(d,sum). type_src0 is explicitly unused, so Q8_0 versus Q4_K caller type does not change vector quantization."
+      }
+    ],
+    "layout": {
+      "input_dtype": "float32",
+      "prepared_dtype": "block_q8_1",
+      "block_values": 32,
+      "block_bytes": 36,
+      "scale_sum": "half2(d,sum)",
+      "row_padding_multiple": 512,
+      "gpu_work": "one quantize_q8_1 kernel per batched preparation, no copy nodes for preparation",
+      "kernel_block": [
+        256,
+        1,
+        1
+      ],
+      "grid_orientation_difference_changes_flat_data": false
+    },
+    "limitations": [
+      "Graph dump does not contain kernel arguments or actual input/output buffer addresses; pointer identity/lifetime comes from current source dataflow, not graph introspection alone.",
+      "Counts prove removable duplicate preparation, not runtime cost or end-to-end gain. Candidate must still pass bitwise output tests and real graph A/B.",
+      "No duplication exists between gate and up within the routed wrapper, or across expert IDs; cross-consumer reuse is the opportunity.",
+      "No cross-layer or cross-request reuse is valid: identical scratch addresses acquire new logical activation contents.",
+      "Graph evidence is historical Prompt13.2 topology, not a newly measured Prompt15 candidate."
+    ]
+  },
+  "candidate_retained": false,
+  "candidate_scope": "Only Q4_K matched grouped gate/up, verification rows exactly2 or3, same source pointer/rows/K; explicit Q8Input passed within Moe; original grouped kernels unchanged.",
+  "performance": {
+    "groups": {
+      "A": {
+        "completed": true,
+        "error": null,
+        "runs": [
+          {
+            "number": 1,
+            "decode_tps": 36.02250751123914,
+            "prefill_tps": 818.7346733220542,
+            "ttft_ms": 1491.1126,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1397.4841999411583,
+            "dependency_bound_verify_ms": 12364.502600133419,
+            "mtp_only_cycle_ms": 14106.7324000597,
+            "all_speculative_cycle_ms": 14173.818799257278,
+            "rollback_ms": 281.79409992694855,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1583.6701009869576,
+              "ms_per_output_token": 3.0991587103462965
+            },
+            "graph_captures_all_profiled": 12,
+            "verification_graph_captures": 6,
+            "verification_graph_replays": 506,
+            "path_counters": {
+              "baseline_routed_preparations": 12126,
+              "reused_preparations": 0,
+              "candidate_rows2": 0,
+              "candidate_rows3": 0,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 141,
+              "reused_preparations": 0,
+              "candidate_rows2": 0,
+              "candidate_rows3": 0,
+              "fallback_other_rows": 47,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 7.313285827636719,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 5934.108000278473,
+                "ms_per_round": 44.95536363847328,
+                "flag_wait_ms": 5393.3626999258995,
+                "ple_wait_ms": 49.39109951257706
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6054.843599796295,
+                "ms_per_round": 50.45702999830246,
+                "flag_wait_ms": 5534.0216999053955,
+                "ple_wait_ms": 42.816800117492676
+              }
+            }
+          },
+          {
+            "number": 2,
+            "decode_tps": 35.9207474152931,
+            "prefill_tps": 1344.0854012250675,
+            "ttft_ms": 949.8809,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1389.8376994729042,
+            "dependency_bound_verify_ms": 12391.951000213623,
+            "mtp_only_cycle_ms": 14137.991500079632,
+            "all_speculative_cycle_ms": 14211.918500602245,
+            "rollback_ms": 300.25310027599335,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1596.5854999423027,
+              "ms_per_output_token": 3.124433463683567
+            },
+            "graph_captures_all_profiled": 12,
+            "verification_graph_captures": 10,
+            "verification_graph_replays": 516,
+            "path_counters": {
+              "baseline_routed_preparations": 12126,
+              "reused_preparations": 0,
+              "candidate_rows2": 0,
+              "candidate_rows3": 0,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 235,
+              "reused_preparations": 0,
+              "candidate_rows2": 0,
+              "candidate_rows3": 0,
+              "fallback_other_rows": 141,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 7.407649993896484,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 5946.8667999506,
+                "ms_per_round": 45.05202121174697,
+                "flag_wait_ms": 5397.9086002111435,
+                "ple_wait_ms": 52.81610006093979
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6051.633600175381,
+                "ms_per_round": 50.430280001461504,
+                "flag_wait_ms": 5530.496900141239,
+                "ple_wait_ms": 50.932099878787994
+              }
+            }
+          },
+          {
+            "number": 3,
+            "decode_tps": 35.838986500954675,
+            "prefill_tps": 1336.186157684877,
+            "ttft_ms": 959.3434,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1387.7639997005463,
+            "dependency_bound_verify_ms": 12428.44470012188,
+            "mtp_only_cycle_ms": 14173.617400169373,
+            "all_speculative_cycle_ms": 14244.800699591637,
+            "rollback_ms": 296.07160049676895,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1590.7782996296883,
+              "ms_per_output_token": 3.113069079510153
+            },
+            "graph_captures_all_profiled": 10,
+            "verification_graph_captures": 10,
+            "verification_graph_replays": 516,
+            "path_counters": {
+              "baseline_routed_preparations": 12126,
+              "reused_preparations": 0,
+              "candidate_rows2": 0,
+              "candidate_rows3": 0,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 235,
+              "reused_preparations": 0,
+              "candidate_rows2": 0,
+              "candidate_rows3": 0,
+              "fallback_other_rows": 141,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 7.787700653076172,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 5948.90039986372,
+                "ms_per_round": 45.06742727169485,
+                "flag_wait_ms": 5411.478499948978,
+                "ple_wait_ms": 62.153999984264374
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6087.02620023489,
+                "ms_per_round": 50.72521833529075,
+                "flag_wait_ms": 5567.244100570679,
+                "ple_wait_ms": 66.11660015583038
+              }
+            }
+          }
+        ],
+        "binary_sha256": "b6a62d7aeecbbd3f2085d7032ebd5f8de59bc550551c5234c2556be136e42501",
+        "fourth_reason": {
+          "noisy_over_3pct": false,
+          "within_1_5pct_of_baseline": false
+        },
+        "medians": {
+          "decode_tps": 35.9207474152931,
+          "prefill_tps": 1336.186157684877,
+          "ttft_ms": 959.3434,
+          "proposal_ms": 1389.8376994729042,
+          "dependency_bound_verify_ms": 12391.951000213623,
+          "mtp_only_cycle_ms": 14137.991500079632,
+          "all_speculative_cycle_ms": 14211.918500602245,
+          "rollback_ms": 296.07160049676895,
+          "wddm_gib": 86.6284294128418
+        },
+        "shape_medians": {
+          "2": {
+            "count": 132,
+            "total_ms": 5946.8667999506,
+            "ms_per_round": 45.05202121174697,
+            "flag_wait_ms": 5397.9086002111435,
+            "ple_wait_ms": 52.81610006093979
+          },
+          "3": {
+            "count": 120,
+            "total_ms": 6054.843599796295,
+            "ms_per_round": 50.45702999830246,
+            "flag_wait_ms": 5534.0216999053955,
+            "ple_wait_ms": 50.932099878787994
+          }
+        },
+        "median_sync_wait_ms": 1590.7782996296883
+      },
+      "B": {
+        "completed": true,
+        "error": null,
+        "runs": [
+          {
+            "number": 1,
+            "decode_tps": 33.15533309891453,
+            "prefill_tps": 777.0834942529839,
+            "ttft_ms": 1570.5582,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1620.1872999668121,
+            "dependency_bound_verify_ms": 13228.37709981203,
+            "mtp_only_cycle_ms": 15322.007999539375,
+            "all_speculative_cycle_ms": 15396.698199391365,
+            "rollback_ms": 377.68000012636185,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1881.3522002100945,
+              "ms_per_output_token": 3.681706849726212
+            },
+            "graph_captures_all_profiled": 12,
+            "verification_graph_captures": 6,
+            "verification_graph_replays": 506,
+            "path_counters": {
+              "baseline_routed_preparations": 282,
+              "reused_preparations": 11844,
+              "candidate_rows2": 6204,
+              "candidate_rows3": 5640,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 47,
+              "reused_preparations": 94,
+              "candidate_rows2": 47,
+              "candidate_rows3": 47,
+              "fallback_other_rows": 47,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 9.341796875,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 6351.916199326515,
+                "ms_per_round": 48.120577267625116,
+                "flag_wait_ms": 5707.787199616432,
+                "ple_wait_ms": 54.13879984617233
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6471.11180049181,
+                "ms_per_round": 53.92593167076508,
+                "flag_wait_ms": 5906.668400168419,
+                "ple_wait_ms": 41.53740042448044
+              }
+            }
+          },
+          {
+            "number": 2,
+            "decode_tps": 34.040287939801104,
+            "prefill_tps": 1135.585275289752,
+            "ttft_ms": 1120.3671,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1533.4948998093605,
+            "dependency_bound_verify_ms": 12956.744499742985,
+            "mtp_only_cycle_ms": 14926.91440063715,
+            "all_speculative_cycle_ms": 14998.119000136852,
+            "rollback_ms": 339.0526006221771,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1767.499299287796,
+              "ms_per_output_token": 3.4589027383322817
+            },
+            "graph_captures_all_profiled": 12,
+            "verification_graph_captures": 10,
+            "verification_graph_replays": 516,
+            "path_counters": {
+              "baseline_routed_preparations": 282,
+              "reused_preparations": 11844,
+              "candidate_rows2": 6204,
+              "candidate_rows3": 5640,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 141,
+              "reused_preparations": 94,
+              "candidate_rows2": 47,
+              "candidate_rows3": 47,
+              "fallback_other_rows": 141,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 9.653919219970703,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 6137.010699748993,
+                "ms_per_round": 46.49250530112874,
+                "flag_wait_ms": 5595.823399543762,
+                "ple_wait_ms": 52.25459957122803
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6403.380299985409,
+                "ms_per_round": 53.361502499878405,
+                "flag_wait_ms": 5802.991900086403,
+                "ple_wait_ms": 75.69110035896301
+              }
+            }
+          },
+          {
+            "number": 3,
+            "decode_tps": 35.72096804186895,
+            "prefill_tps": 1309.6696451065066,
+            "ttft_ms": 969.1511,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1382.7670996785164,
+            "dependency_bound_verify_ms": 12478.879300415516,
+            "mtp_only_cycle_ms": 14217.079100310802,
+            "all_speculative_cycle_ms": 14293.207099497318,
+            "rollback_ms": 292.71059918403625,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1584.5752002596855,
+              "ms_per_output_token": 3.1009299417997758
+            },
+            "graph_captures_all_profiled": 10,
+            "verification_graph_captures": 10,
+            "verification_graph_replays": 516,
+            "path_counters": {
+              "baseline_routed_preparations": 282,
+              "reused_preparations": 11844,
+              "candidate_rows2": 6204,
+              "candidate_rows3": 5640,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 141,
+              "reused_preparations": 94,
+              "candidate_rows2": 47,
+              "candidate_rows3": 47,
+              "fallback_other_rows": 141,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 9.72365951538086,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 5968.4031002521515,
+                "ms_per_round": 45.21517500191024,
+                "flag_wait_ms": 5438.403500318527,
+                "ple_wait_ms": 75.7058002948761
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6120.759400188923,
+                "ms_per_round": 51.00632833490769,
+                "flag_wait_ms": 5604.421500384808,
+                "ple_wait_ms": 76.87939995527267
+              }
+            }
+          },
+          {
+            "number": 4,
+            "decode_tps": 35.875452448428724,
+            "prefill_tps": 1336.7663175277833,
+            "ttft_ms": 950.7506,
+            "output_sha256": "9b26a2ddd9518368939d4d29f107f398e793acd5f5cbdb926b2a9ffaa900c4f7",
+            "mtp_drafted": 391,
+            "mtp_accepted": 253,
+            "mtp_acceptance": 0.6470588235294118,
+            "mtp_only_accepted_per_output": 0.49607843137254903,
+            "mtp_output_tokens": 510,
+            "lookup_drafted": 6,
+            "lookup_accepted": 0,
+            "lookup_cycles": 1,
+            "proposal_ms": 1377.5593000650406,
+            "dependency_bound_verify_ms": 12428.693199396133,
+            "mtp_only_cycle_ms": 14157.54769974947,
+            "all_speculative_cycle_ms": 14230.292800366879,
+            "rollback_ms": 286.68790036439896,
+            "sync": {
+              "stream_syncs": 361,
+              "device_syncs": 0,
+              "event_syncs": 0,
+              "wait_ms": 1570.51129925251,
+              "ms_per_output_token": 3.0734076306311353
+            },
+            "graph_captures_all_profiled": 10,
+            "verification_graph_captures": 10,
+            "verification_graph_replays": 516,
+            "path_counters": {
+              "baseline_routed_preparations": 282,
+              "reused_preparations": 11844,
+              "candidate_rows2": 6204,
+              "candidate_rows3": 5640,
+              "fallback_other_rows": 282,
+              "compatible_shared_routed_pairs": 11844
+            },
+            "capture_host_path_counters": {
+              "baseline_routed_preparations": 141,
+              "reused_preparations": 94,
+              "candidate_rows2": 47,
+              "candidate_rows3": 47,
+              "fallback_other_rows": 141,
+              "compatible_shared_routed_pairs": 94
+            },
+            "missing_graph_template": 0,
+            "overflow": 0,
+            "wddm_gib": 86.6284294128418,
+            "host_available_gib": 9.733333587646484,
+            "target_load_count": 1,
+            "mtp_load_count": 1,
+            "rounds": {
+              "2": {
+                "count": 132,
+                "total_ms": 5943.940399765968,
+                "ms_per_round": 45.029851513378546,
+                "flag_wait_ms": 5411.261600077152,
+                "ple_wait_ms": 73.52170038223267
+              },
+              "3": {
+                "count": 120,
+                "total_ms": 6092.3968995809555,
+                "ms_per_round": 50.76997416317463,
+                "flag_wait_ms": 5591.332599699497,
+                "ple_wait_ms": 79.78549987077713
+              }
+            }
+          }
+        ],
+        "binary_sha256": "b6a62d7aeecbbd3f2085d7032ebd5f8de59bc550551c5234c2556be136e42501",
+        "fourth_reason": {
+          "noisy_over_3pct": true,
+          "within_1_5pct_of_baseline": false
+        },
+        "medians": {
+          "decode_tps": 34.88062799083502,
+          "prefill_tps": 1222.6274601981293,
+          "ttft_ms": 1044.7591,
+          "proposal_ms": 1458.1309997439384,
+          "dependency_bound_verify_ms": 12717.81190007925,
+          "mtp_only_cycle_ms": 14571.996750473976,
+          "all_speculative_cycle_ms": 14645.663049817085,
+          "rollback_ms": 315.8815999031067,
+          "wddm_gib": 86.6284294128418
+        },
+        "shape_medians": {
+          "2": {
+            "count": 132.0,
+            "total_ms": 6052.706900000572,
+            "ms_per_round": 45.85384015151949,
+            "flag_wait_ms": 5517.113449931145,
+            "ple_wait_ms": 63.8302501142025
+          },
+          "3": {
+            "count": 120.0,
+            "total_ms": 6262.069850087166,
+            "ms_per_round": 52.18391541739305,
+            "flag_wait_ms": 5703.706700235605,
+            "ple_wait_ms": 76.28525015711784
+          }
+        },
+        "median_sync_wait_ms": 1676.0372497737408
+      }
+    },
+    "timing_contract": "DEPENDENCY-BOUND GRAPH COMPLETION WALL TIME; existing Windows steady_clock (QPC implementation); no added HIP event measurements",
+    "math_test_log": "PASS Q4_K activation reuse rows=2 M=640 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=2 M=640 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=2 M=641 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=2 M=641 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=3 M=640 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=3 M=640 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=3 M=641 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\nPASS Q4_K activation reuse rows=3 M=641 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays\n",
+    "incomplete_baseline_attempt": null,
+    "gain_pct": -2.895595162408149,
+    "shape_gain_pct": {
+      "2": -1.7486407618707456,
+      "3": -3.3092293004043483
+    },
+    "checks": {
+      "A_and_B_completed": true,
+      "same_binary": true,
+      "hashes": true,
+      "speculation": true,
+      "sync_counts": true,
+      "round_counts": true,
+      "candidate_executed": true,
+      "baseline_selected": true,
+      "other_shapes_fallback": true,
+      "counter_templates": true,
+      "no_model_reload": true,
+      "bounded_wddm": true
+    }
+  },
+  "preparation_counters_per_request": {
+    "A": {
+      "unique_eligible_batches": 11844,
+      "actual_compatible_preparations": 23688,
+      "reused": 0,
+      "avoided": 0
+    },
+    "B": {
+      "unique_eligible_batches": 11844,
+      "actual_compatible_preparations": 11844,
+      "reused": 11844,
+      "avoided": 11844,
+      "rows2_reused": 6204,
+      "rows3_reused": 5640
+    },
+    "both": {
+      "other_row_q4_baseline_preparations": 282,
+      "rows2_rounds": 132,
+      "rows3_rounds": 120
+    },
+    "semantics": "Actual eager callbacks plus captured dispatch deltas applied once per graph launch, excluding capture construction. Unique counts are scoped to proven compatible shared/routed Q4 pairs, not all model activation tensors."
+  },
+  "graph_node_count_contract": "Baseline graph topology from Prompt13.2. Candidate counts are SOURCE-DERIVED expected counts (one removed quantization per eligible layer), not a new production graph-node dump. Actual graph replay/capture counts and candidate execution verified.",
+  "protocol": "A3 complete requests in one loaded runtime. B3 plus prescribed fourth for >3% deviation from median. First requests included; no warmup excluded. Same diagnostic binary; process gate set before capture. No additional candidate design or confirmation pair because no gain.",
+  "interpretation": "The duplication is real and removed, but this trial establishes no end-to-end benefit. B varied from33.155 to35.875tok/s; even its last two do not demonstrate gain over A. No causal claim that reuse intrinsically slows kernels or proof of critical-path quantization cost. Unchanged prefill/proposal also varied, so system conditions may contribute. Retention rejected under specified gate.",
+  "pure_gpu_timing_used": false,
+  "timing_contract": "DEPENDENCY-BOUND GRAPH COMPLETION WALL TIME: before prefix through existing required completion, includes launch/host/PLE dependencies, not isolated suffix/GPU kernel time. No extra synchronization.",
+  "focused_test": {
+    "passed": true,
+    "cases": 8,
+    "replays_per_case": 3,
+    "checks": [
+      "bitwise shared/routed quantized layout",
+      "bitwise baseline/reuse grouped output",
+      "bitwise separate gate/up+GPU SwiGLU reference",
+      "disjoint/shared/duplicate/inactive routes",
+      "M640/641 K2560 rows2/3",
+      "buffer guards",
+      "one intervening quantization in alternate slot",
+      "changed source contents at same address across replays"
+    ],
+    "log": "benchmarks/prompt15/math-test.log"
+  },
+  "build": {
+    "command": "scripts/build.ps1 -SkipBundledTests",
+    "result": "PASS",
+    "attempts": 2,
+    "first_failure": "Host test included device-only common.hpp; replaced with lightweight enum header and exact host function declaration. Production source compiled.",
+    "network": "Cached installed dependencies; Git protocol restricted to file and HTTP proxies disabled external access. No installs/driver/runtime changes.",
+    "full_suite_run": false
+  },
+  "secondary_new_code": "NOT RUN: primary candidate did not win",
+  "secondary_code_edit": "NOT RUN: primary candidate did not win",
+  "memory": "No new activation buffer, existing double-buffered Q8 slots reused. Group scratch smaller. WDDM86.628429GiB all7requests; no observed growth. Host5GiBguard unchanged. Task engines stopped.",
+  "restoration": {
+    "files_verified": 123,
+    "all_original_hashes_match": true,
+    "git_state_checks": {
+      "status.txt": true,
+      "refs.txt": true,
+      "index.patch": true,
+      "git-config.txt": true
+    },
+    "restored": [
+      "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h",
+      "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.hip.cpp",
+      "CMakeLists.txt",
+      "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp",
+      "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.hpp",
+      "src/native/main.cpp",
+      "dist/engine/FlashNextVelocity.Engine.exe"
+    ],
+    "prepared_files_restored": true,
+    "head": "b58deeb81e19b250222fe259d223339c8634543a",
+    "commit": null,
+    "remote_contacted": false,
+    "remote_updated": false
+  },
+  "artifact_paths": [
+    "benchmarks/prompt15/A.json",
+    "benchmarks/prompt15/B.json",
+    "benchmarks/prompt15/analysis.json",
+    "benchmarks/prompt15/graph-audit.json",
+    "benchmarks/prompt15/redundancy-proof.json",
+    "benchmarks/prompt15/trial.patch",
+    "benchmarks/prompt15/trial-source",
+    "benchmarks/prompt15/trial-engine.exe",
+    "benchmarks/prompt15/math-test.exe",
+    "benchmarks/prompt15/restoration.json"
+  ],
+  "next_candidate": "Read-only attribution then one narrow matched A/B of Q8_0 shared-expert down projection, Executor::Moe -> Dense(l.shexp_down,s_.shexp_up) -> qfn_mmq_q8_0_dense_vec_preq -> qfn_q8_shallow_kernel, rows2/3, M2560 K640. Structural candidate only; no bottleneck claim and no optimization performed.",
+  "next_candidate_details": {
+    "M": 2560,
+    "K": 640,
+    "rows": [
+      2,
+      3
+    ],
+    "kernel": "qfn_q8_shallow_kernel<2/3,false>",
+    "grid": [
+      2560,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "launches_per_round": 48,
+    "prefix_launches": 1,
+    "suffix_launches": 47,
+    "prefix_node": 31,
+    "suffix_layer1_node": 41,
+    "possible_reference": "qfn_q8_mmvq_reference",
+    "caveat": "Structural candidate, not measured bottleneck; no implementation/test performed."
+  }
+}

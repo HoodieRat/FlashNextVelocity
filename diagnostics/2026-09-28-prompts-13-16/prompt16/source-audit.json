@@ -1,0 +1,2732 @@
+{
+  "task": "Prompt16 read-only source and physical GGUF audit",
+  "remote_contacted": false,
+  "gpu_work_performed": false,
+  "model_loaded": false,
+  "shards": [
+    {
+      "path": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+      "gguf_version": 3,
+      "tensor_count": 0,
+      "metadata_count": 67,
+      "tensor_directory_end": 10946618,
+      "model_payload_read": false
+    },
+    {
+      "path": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "gguf_version": 3,
+      "tensor_count": 297,
+      "metadata_count": 3,
+      "tensor_directory_end": 18695,
+      "model_payload_read": false
+    },
+    {
+      "path": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "gguf_version": 3,
+      "tensor_count": 752,
+      "metadata_count": 3,
+      "tensor_directory_end": 48045,
+      "model_payload_read": false
+    },
+    {
+      "path": "<model-store>\\Qwen3.8-Flash-Next-UD-Q4_K_XL\\UD-Q4_K_XL\\Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "gguf_version": 3,
+      "tensor_count": 175,
+      "metadata_count": 3,
+      "tensor_directory_end": 11267,
+      "model_payload_read": false
+    }
+  ],
+  "target_tensor_count": 48,
+  "target_tensors": [
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.0.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 30831713280
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.1.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 32491812736
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.2.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 34449158912
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.3.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 36327331456
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.4.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 38234993280
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.5.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 39895092736
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.6.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 41555192192
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.7.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 43223649536
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.8.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 44869167360
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.9.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 46529266816
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.10.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 48189366272
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+      "name": "blk.11.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 49857823616
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.12.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 1643777024
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.13.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 3303876480
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.14.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 4963975936
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.15.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 6632433280
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.16.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 8277951104
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.17.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 9938050560
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.18.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 11598150016
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.19.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 13266607360
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.20.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 14912125184
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.21.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 16572224640
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.22.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 18232324096
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.23.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 19900781440
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.24.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 21546299264
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.25.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 23206398720
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.26.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 24866498176
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.27.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 26534955520
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.28.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 28180473344
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.29.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 29840572800
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.30.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 31762816256
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.31.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 33431273600
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.32.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 35076791424
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.33.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 36736890880
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.34.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 38396990336
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.35.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 40065447680
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.36.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 41710965504
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.37.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 43371064960
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.38.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 45031164416
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.39.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 46699621760
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+      "name": "blk.40.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 48345139584
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.41.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 629145600
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.42.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 2289245056
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.43.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 3957702400
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.44.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 5603220224
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.45.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 7263319680
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.46.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 9185563136
+    },
+    {
+      "shard": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+      "name": "blk.47.ffn_down_shexp.weight",
+      "gguf_ne": [
+        640,
+        2560
+      ],
+      "ggml_type": 8,
+      "ggml_type_name": "Q8_0",
+      "tensor_relative_offset": 11116164480
+    }
+  ],
+  "physical_layout": {
+    "GGUF_ne0": 640,
+    "GGUF_ne1": 2560,
+    "kernel_K": 640,
+    "kernel_M": 2560,
+    "weight_block_values": 32,
+    "weight_block_bytes": 34,
+    "weight_blocks_per_output_row": 20,
+    "weight_bytes_per_output_row": 680,
+    "weight_bytes_per_tensor": 1740800,
+    "input_format": "block_q8_1",
+    "input_block_bytes": 36,
+    "input_padded_K": 1024,
+    "input_stride_blocks": 32,
+    "output_dtype": "float32",
+    "output_index": "token * M + output_row"
+  },
+  "historical_graph_evidence": {
+    "path": "<workspace>\\benchmarks\\prompt13_2-verification-graph-topology.json",
+    "sha256": "c0344800dadffb3ea28abe3dbc496447fdb4e44a072b40d976194eea634f276e",
+    "graphs": [
+      {
+        "rows": 2,
+        "piece": "prefix",
+        "graph_key": 244813266946,
+        "projection_count": 1,
+        "layers": [
+          {
+            "layer": 0,
+            "preparation_node": 30,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 31,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "rows": 2,
+        "piece": "suffix",
+        "graph_key": 210453528578,
+        "projection_count": 47,
+        "layers": [
+          {
+            "layer": 1,
+            "preparation_node": 40,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 41,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 2,
+            "preparation_node": 75,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 76,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 3,
+            "preparation_node": 111,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 112,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 4,
+            "preparation_node": 146,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 147,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 5,
+            "preparation_node": 181,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 182,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 6,
+            "preparation_node": 216,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 217,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 7,
+            "preparation_node": 252,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 253,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 8,
+            "preparation_node": 287,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 288,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 9,
+            "preparation_node": 322,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 323,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 10,
+            "preparation_node": 357,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 358,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 11,
+            "preparation_node": 393,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 394,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 12,
+            "preparation_node": 428,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 429,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 13,
+            "preparation_node": 463,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 464,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 14,
+            "preparation_node": 498,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 499,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 15,
+            "preparation_node": 534,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 535,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 16,
+            "preparation_node": 569,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 570,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 17,
+            "preparation_node": 604,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 605,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 18,
+            "preparation_node": 639,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 640,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 19,
+            "preparation_node": 675,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 676,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 20,
+            "preparation_node": 710,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 711,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 21,
+            "preparation_node": 745,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 746,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 22,
+            "preparation_node": 780,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 781,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 23,
+            "preparation_node": 816,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 817,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 24,
+            "preparation_node": 851,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 852,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 25,
+            "preparation_node": 886,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 887,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 26,
+            "preparation_node": 921,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 922,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 27,
+            "preparation_node": 957,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 958,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 28,
+            "preparation_node": 992,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 993,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 29,
+            "preparation_node": 1027,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1028,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 30,
+            "preparation_node": 1062,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1063,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 31,
+            "preparation_node": 1098,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1099,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 32,
+            "preparation_node": 1133,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1134,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 33,
+            "preparation_node": 1168,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1169,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 34,
+            "preparation_node": 1203,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1204,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 35,
+            "preparation_node": 1239,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1240,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 36,
+            "preparation_node": 1274,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1275,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 37,
+            "preparation_node": 1309,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1310,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 38,
+            "preparation_node": 1344,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1345,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 39,
+            "preparation_node": 1380,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1381,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 40,
+            "preparation_node": 1415,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1416,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 41,
+            "preparation_node": 1450,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1451,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 42,
+            "preparation_node": 1485,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1486,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 43,
+            "preparation_node": 1521,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1522,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 44,
+            "preparation_node": 1556,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1557,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 45,
+            "preparation_node": 1591,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1592,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 46,
+            "preparation_node": 1626,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1627,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 47,
+            "preparation_node": 1662,
+            "preparation_grid": [
+              4,
+              2,
+              1
+            ],
+            "projection_node": 1663,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<2, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "rows": 3,
+        "piece": "prefix",
+        "graph_key": 244813332483,
+        "projection_count": 1,
+        "layers": [
+          {
+            "layer": 0,
+            "preparation_node": 30,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 31,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "rows": 3,
+        "piece": "suffix",
+        "graph_key": 210453594115,
+        "projection_count": 47,
+        "layers": [
+          {
+            "layer": 1,
+            "preparation_node": 40,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 41,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 2,
+            "preparation_node": 76,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 77,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 3,
+            "preparation_node": 112,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 113,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 4,
+            "preparation_node": 148,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 149,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 5,
+            "preparation_node": 184,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 185,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 6,
+            "preparation_node": 220,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 221,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 7,
+            "preparation_node": 257,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 258,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 8,
+            "preparation_node": 293,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 294,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 9,
+            "preparation_node": 329,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 330,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 10,
+            "preparation_node": 365,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 366,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 11,
+            "preparation_node": 402,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 403,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 12,
+            "preparation_node": 438,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 439,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 13,
+            "preparation_node": 474,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 475,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 14,
+            "preparation_node": 510,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 511,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 15,
+            "preparation_node": 547,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 548,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 16,
+            "preparation_node": 583,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 584,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 17,
+            "preparation_node": 619,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 620,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 18,
+            "preparation_node": 655,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 656,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 19,
+            "preparation_node": 692,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 693,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 20,
+            "preparation_node": 728,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 729,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 21,
+            "preparation_node": 764,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 765,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 22,
+            "preparation_node": 800,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 801,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 23,
+            "preparation_node": 837,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 838,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 24,
+            "preparation_node": 873,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 874,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 25,
+            "preparation_node": 909,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 910,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 26,
+            "preparation_node": 945,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 946,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 27,
+            "preparation_node": 982,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 983,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 28,
+            "preparation_node": 1018,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1019,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 29,
+            "preparation_node": 1054,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1055,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 30,
+            "preparation_node": 1090,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1091,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 31,
+            "preparation_node": 1127,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1128,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 32,
+            "preparation_node": 1163,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1164,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 33,
+            "preparation_node": 1199,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1200,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 34,
+            "preparation_node": 1235,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1236,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 35,
+            "preparation_node": 1272,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1273,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 36,
+            "preparation_node": 1308,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1309,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 37,
+            "preparation_node": 1344,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1345,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 38,
+            "preparation_node": 1380,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1381,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 39,
+            "preparation_node": 1417,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1418,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 40,
+            "preparation_node": 1453,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1454,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 41,
+            "preparation_node": 1489,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1490,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 42,
+            "preparation_node": 1525,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1526,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 43,
+            "preparation_node": 1562,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1563,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 44,
+            "preparation_node": 1598,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1599,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 45,
+            "preparation_node": 1634,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1635,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 46,
+            "preparation_node": 1670,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1671,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          },
+          {
+            "layer": 47,
+            "preparation_node": 1707,
+            "preparation_grid": [
+              4,
+              3,
+              1
+            ],
+            "projection_node": 1708,
+            "kernel": "void qfn_mmq::qfn_q8_shallow_kernel<3, false>(qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_0 const*, qfn_mmq::block_q8_1 const*, float*, int, int, int)",
+            "grid": [
+              2560,
+              1,
+              1
+            ],
+            "block": [
+              32,
+              1,
+              1
+            ]
+          }
+        ]
+      }
+    ],
+    "whole_round_launches": 48,
+    "prefix_launches": 1,
+    "suffix_launches": 47,
+    "includes_layer2_Q5_routed_experts": true,
+    "caveat": "Prior Prompt13.2 kernel topology, not new Prompt16 measurement. Node dump lacks kernel arguments; source plus direct GGUF directory validates operation and dimensions."
+  },
+  "source_files": {
+    "executor_before": {
+      "path": "<workspace>\\benchmarks\\prompt16\\before\\gufo-overlay\\src\\models\\qwen38_flash_next\\kernels\\rocm\\executor.cpp",
+      "sha256": "eaa46379f0acec70b3e0ffb91c402dbf008453684006a926d28ca06ecd4a5eb2"
+    },
+    "wrapper_before": {
+      "path": "<workspace>\\benchmarks\\prompt16\\before\\gufo-overlay\\src\\models\\qwen38_flash_next\\kernels\\rocm\\mmq\\qfn_mmq.hip.cpp",
+      "sha256": "1ac07adfdedf27505e7adb7690733da190d5c63db2038c87c1755c66d0eccae6"
+    },
+    "mmvq": {
+      "path": "<pinned-gufo>\\src\\models\\qwen38_flash_next\\kernels\\rocm\\mmq\\mmvq.hip.cpp",
+      "sha256": "6bd3216f62674fa404a26fbe5451989ef5201e8403441f4d467186a37bc80435"
+    },
+    "vecdotq": {
+      "path": "<pinned-gufo>\\src\\models\\qwen38_flash_next\\kernels\\rocm\\mmq\\vecdotq.hpp",
+      "sha256": "2106a5f1814d3f191e6b68ffca878fe92598ead5980950d5c1744f8c0afe1370"
+    },
+    "shared_down_gate": {
+      "path": "<workspace>\\gufo-overlay\\src\\models\\qwen38_flash_next\\kernels\\rocm\\mmq\\shared_down.hpp",
+      "sha256": "405bb96908e00559451795e9684fa0fa80fb9c51bb42f011cd4583c88934bb78"
+    }
+  },
+  "dispatch": {
+    "executor": "Moe -> Dense(l.shexp_down, s_.shexp_up, s_.shexp_out) -> Quantize -> Dense(Q8Input) -> qfn_mmq_q8_0_dense_vec_preq",
+    "baseline": "qfn_q8_shallow_vec -> launch_q8_shallow<2/3> -> qfn_q8_shallow_kernel<2/3,false>",
+    "candidate": "qfn_q8_mmvq_reference -> mul_mat_vec_q8_dispatch -> launch_q8<2/3> -> mul_mat_vec_q8<2/3,false,1,false>",
+    "both_grid": [
+      2560,
+      1,
+      1
+    ],
+    "both_block": [
+      32,
+      1,
+      1
+    ],
+    "both_kernel_launch_count": 1,
+    "preparation_changed": false,
+    "weight_format_changed": false,
+    "gate_pointer": null
+  },
+  "arithmetic_comparison": {
+    "QI8_0": 8,
+    "VDR": 2,
+    "k_blocks": 20,
+    "first_k_block": "lane / 4",
+    "k_block_increment": 8,
+    "quant_part": "(lane % 4) * 2",
+    "dot": "two packed dp4a operations per lane partial",
+    "scale": "float weight_scale * float input_scale * float(integer_dot)",
+    "accumulation": "same sequential per-lane K partials; warp_reduce_sum<32>; lane0 store",
+    "source_difference": "Shallow hoists weight loads/scale extraction outside token loop. Reference invokes inlined vec_dot_q8_0_q8_1 inside token loop. Compiler may remove or alter resulting load scheduling; performance must be measured.",
+    "bitwise_equivalence_proven_by_source_only": false
+  },
+  "alternatives": {
+    "selected": "Existing qfn_q8_mmvq_reference is directly compatible and requires only dispatch substitution.",
+    "rejected_as_out_of_scope": [
+      "mul_mat_q8_decode_batch WMMA path requires wider token rows and K2560 conditions",
+      "multi-wave launch_q8_batch is for tokens >8",
+      "HC down specialization has different M320 K10240"
+    ],
+    "new_kernel_needed": false
+  },
+  "focused_test_gap": "Existing tests/q8_shallow_test.hip.cpp case named shexp-down uses M40 K2560, not actual M2560 K640. Actual shape must receive focused bitwise, finite-output and graph tests.",
+  "integration_review": {
+    "verdict": "APPROVE",
+    "confidence": "medium until build and GPU correctness/graph tests",
+    "blocking_findings": [],
+    "checked": [
+      "SharedScope surrounds only shared-expert down Dense call; restores prior scope on all exits.",
+      "VerifyScope tracks target ForwardMode::kVerify; candidate additionally requires SharedScope and exact M2560 K640 rows2/3 and null W_gate.",
+      "Quantization and gate/up/router/down-other-experts/HC paths retain existing calls and arithmetic.",
+      "Candidate uses existing reference and preserves supplied stream; no extra synchronization or allocations introduced by dispatch.",
+      "Candidate gate is process-fixed; graph selection does not change after capture.",
+      "Capture call deltas are subtracted from executed counts and replay-applied once per graph launch.",
+      "Per-request round storage fixed512; counter overflow and missing templates exposed."
+    ],
+    "required_runtime_checks": [
+      "Exact canonical hash and speculative metrics",
+      "Bitwise actual-shape focused comparison",
+      "Candidate counters on replay including rows2 and3",
+      "missing_template=0 and overflow=0",
+      "Real end-to-end A/B; no benefit inferred from topology"
+    ]
+  }
+}

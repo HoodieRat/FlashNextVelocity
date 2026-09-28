@@ -1,0 +1,494 @@
+--- a/src/native/main.cpp
++++ b/src/native/main.cpp
+@@ -118,6 +118,7 @@
+ };
+ 
+ struct Metrics {
++  Value hip_timer_contract;
+   LookupPolicy lookup_policy{};
+   std::uint32_t lookup_capacity{0};
+   std::uint64_t prompt_tokens{0};
+@@ -1170,6 +1171,7 @@
+ 
+ Value MetricsJson(const Metrics& m) {
+   Value v = Value::object();
++  if (!m.hip_timer_contract.is_null()) v["hip_timer_contract"] = m.hip_timer_contract;
+   v["prompt_tokens"] = static_cast<unsigned long long>(m.prompt_tokens);
+   v["completion_tokens"] = static_cast<unsigned long long>(m.completion_tokens);
+   v["max_tokens_requested"] = static_cast<unsigned long long>(m.requested_max_tokens);
+@@ -1585,22 +1587,25 @@
+                   std::int64_t requested_seed = -1,
+                   bool stream = false,
+                   LookupMode lookup_mode = LookupMode::kSticky) {
++    std::lock_guard generation_lock(generation_mutex_);
+     struct ProfileGuard {
+       bool on{false};
+       explicit ProfileGuard(bool enable) : on(enable) {
+         if (!on) return;
+         fnvprof::Reset();
++        fnvcontract::Begin();
+         qfn_q8_shallow_reset();
+         fnvprof::SetEnabled(true);
+         fnvprof::SetPhase(fnvprof::Phase::Prefill);
+       }
+       ~ProfileGuard() {
+         if (!on) return;
++        if(fnvcontract::Active() && fnvcontract::Finish)fnvcontract::Finish();
+         fnvprof::SetPhase(fnvprof::Phase::Off);
+         fnvprof::SetEnabled(false);
++        fnvcontract::state.on=false;
+       }
+     } profile_guard(profile);
+-    std::lock_guard generation_lock(generation_mutex_);
+     CheckMemoryFloor("request start");
+     if (!session_->IsValid()) {
+       std::string error;
+@@ -1811,6 +1816,10 @@
+     m.speed_windows = std::move(windows);
+     m.has_request = true;
+     if (profile) {
++      if(fnvcontract::Active()) {
++        if(fnvcontract::Finish)fnvcontract::Finish();
++        m.hip_timer_contract=fnvcontract::Json();
++      }
+       fnvprof::SetPhase(fnvprof::Phase::Off);
+       m.profile = fnvprof::BuildReport(m.decode_ms);
+       LogDeviceMemory("after profiled request");
+--- a/src/native/bench_profile.hpp
++++ b/src/native/bench_profile.hpp
+@@ -2,6 +2,8 @@
+ 
+ // Benchmark-only decode profile. Counters stay off during normal API calls.
+ // HIP event recording lives next to the kernels; this header only stores totals.
++
++#include "hip_timer_contract.hpp"
+ 
+ #include <algorithm>
+ #include <atomic>
+@@ -510,11 +512,13 @@
+ }
+ 
+ template <class Stream, class Fn>
+-inline auto TimedStreamSync(Stream stream, Fn sync) -> decltype(sync(stream)) {
++inline auto TimedStreamSync(Stream stream, Fn sync, int contract_reason = 0) -> decltype(sync(stream)) {
+   if (!OnDecode()) return sync(stream);
+   const double t0 = NowMs();
+   auto err = sync(stream);
+-  AddStreamSync(NowMs() - t0);
++  const double ms=NowMs()-t0;
++  AddStreamSync(ms);
++  fnvcontract::NoteSync(contract_reason,ms);
+   return err;
+ }
+ 
+--- a/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
+@@ -1,6 +1,8 @@
+ #include "src/models/qwen38_flash_next/kernels/rocm/executor.hpp"
+ 
+ #include "bench_profile.hpp"
++#include <limits>
++#include "hip_timer_contract_hip.hpp"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -530,6 +532,7 @@
+ }
+ 
+ Executor::~Executor() {
++  fnvcontract::ReleaseEvents();
+   // Readers write pinned staging memory; drain them before freeing it,
+   // including when a forward failed before reaching PLE.
+   if (ple_pending_) {
+@@ -2208,6 +2211,7 @@
+         fnvprof::NoteGraphCapture();
+         QsaBeginHost();
+       }
++      fnvcontract::Capture(key);
+       const bool ok = body();
+       if (profile) QsaEndHost(key);
+       if (!Check(hipStreamEndCapture(stream_, &captured), "graph capture end",
+@@ -2221,13 +2225,17 @@
+       const bool instantiated =
+           Check(hipGraphInstantiate(&exec, captured, nullptr, nullptr, 0),
+                 "graph instantiate", error_msg);
++      if(instantiated)fnvcontract::Dump(captured,exec,stream_,key);
+       (void)hipGraphDestroy(captured);
+       if (!instantiated) {
+         return false;
+       }
+       session.graphs_.emplace(key, exec);
+     }
+-    if (!Check(hipGraphLaunch(exec, stream_), "graph launch", error_msg)) {
++    fnvcontract::Replay timer(stream_,key,exec);
++    const auto launch_status=hipGraphLaunch(exec,stream_);
++    timer.End(stream_,launch_status);
++    if (!Check(launch_status, "graph launch", error_msg)) {
+       return false;
+     }
+     return finish(synchronize);
+@@ -2382,6 +2390,11 @@
+                             (static_cast<std::uint64_t>(download_logits) << 34) |
+                             (compact_key << 37) |
+                             (fnvprof::OnDecode() ? fnvprof::kProfileGraphBit : 0);
++  const bool contract=speculative && fnvcontract::Active() && fnvprof::OnDecode();
++  const double contract_start=contract ? fnvcontract::Qpc() : 0;
++  const double contract_ple=contract ? fnvprof::S().ple_wait_ms : 0;
++  const auto contract_replays=fnvcontract::state.samples;
++  const auto contract_captures=fnvprof::S().graph_captures;
+   // PLE first consumes the disk rows at its injection layer. Queue the
+   // preceding layers before waiting, including on captured graph replay.
+   // Both pieces use the same stream and arithmetic as the unsplit graph.
+@@ -2412,9 +2425,22 @@
+     return false;
+   }
+   const bool flag_wait = graph && done_flag_ != nullptr;
+-  if (!Run(session, key, graph, body, error_msg, !flag_wait) ||
+-      (flag_wait && !Wait("forward", error_msg))) {
+-    return false;
++  const bool forward_ok=Run(session, key, graph, body, error_msg, !flag_wait);
++  const double contract_wait_start=contract ? fnvcontract::Qpc() : 0;
++  if(contract)fnvcontract::wait_begin=++fnvcontract::sequence;
++  if (!forward_ok || (flag_wait && !Wait("forward", error_msg))) {
++    return false;
++  }
++  if(contract) {
++    const double done=fnvcontract::Qpc();
++    fnvcontract::wait_end=++fnvcontract::sequence;
++    auto& c=fnvcontract::state;
++    if(c.rounds<c.round.size())c.round[c.rounds++]={n,c.samples-contract_replays,
++      static_cast<unsigned>(fnvprof::S().graph_captures-contract_captures),
++      done-contract_start,flag_wait ? done-contract_wait_start : 0,
++      fnvprof::S().ple_wait_ms-contract_ple};
++    else ++c.overflow;
++    if(fnvcontract::Collect)fnvcontract::Collect();
+   }
+   if (speculative) {
+     // Decode graphs replay without executing ForwardBody on the host, so the
+@@ -2468,6 +2494,7 @@
+     session.vision_input_.Inject(s_.res, start_pos, n, c.hidden_size,
+                                  c.hc_count, stream_);
+   }
++  fnvcontract::Mark(stream_,"ForwardBody control/token H2D + EmbedTokens + optional vision");
+   const auto& layers = model_->layers();
+   bool normed = false;  ///< xn holds the next mixer's grouped norm of res
+   for (std::uint32_t il = first_layer; il < end_layer; ++il) {
+@@ -2478,9 +2505,11 @@
+         !Ple(l, session, n, s_.res, speculative, error_msg)) {
+       return false;
+     }
++    fnvcontract::Mark(stream_,"Ple (if enabled)",il);
+     if (!HcMix(l.hc_attn, s_.res, normed, s_.mixed, s_.inject, n, error_msg)) {
+       return false;
+     }
++    fnvcontract::Mark(stream_,"HcMix attention",il);
+     if (l.linear) {
+       if (!LinearAttention(l, session.linear_[il], s_.mixed, s_.block_out, n,
+                            speculative, error_msg)) {
+@@ -2493,19 +2522,23 @@
+       return false;
+     }
+ 
++    fnvcontract::Mark(stream_,l.linear?"LinearAttention":"Attention",il);
+     // Each combine also norms the residual for the mixer that follows it,
+     // unless PLE rewrites the residual first.
+     Combine(s_.res, l.hc_ffn.norm.f32(), n);
++    fnvcontract::Mark(stream_,"Combine after attention",il);
+     if (!HcMix(l.hc_ffn, s_.res, true, s_.mixed, s_.inject, n, error_msg) ||
+         !Moe(l, s_.mixed, s_.block_out, n, error_msg)) {
+       return false;
+     }
++    fnvcontract::Mark(stream_,"HcMix FFN + Moe",il);
+     const float* next_norm =
+         il + 1 < c.num_layers
+             ? (c.IsPleLayer(il + 1) ? nullptr
+                                     : layers[il + 1].hc_attn.norm.f32())
+             : model_->hc_head().norm.f32();
+     Combine(s_.res, next_norm, n);
++    fnvcontract::Mark(stream_,"Combine after FFN",il);
+     normed = next_norm != nullptr;
+   }
+   verify_trunk.Finish();
+@@ -2524,6 +2557,7 @@
+              "hidden keep", error_msg)) {
+     return false;
+   }
++  fnvcontract::Mark(stream_,"ForwardBody target hidden retain D2D");
+   if (n_logits > 0) {
+     PrefillPhase head_phase(false);
+     // The head mixer norms its tail rows itself: the last combine's norm is
+@@ -2540,6 +2574,7 @@
+       }
+     }
+     {
++      fnvcontract::Mark(stream_,"HcMix output head");
+       VerifyGpuSpan projection_span(
+           stream_, fnvprof::VerifySubstage::VocabProjection,
+           speculative && fnvprof::OnDecode());
+@@ -2547,6 +2582,7 @@
+         return false;
+       }
+     }
++    fnvcontract::Mark(stream_,"Dense vocabulary projection");
+     if (compact_candidates != 0) {
+       if (!speculative || mtp_verify_candidates_host_ == nullptr ||
+           n_logits < 2) {
+@@ -2590,6 +2626,7 @@
+               return false;
+           }
+         }
++        fnvcontract::Mark(stream_,"MtpTopVerificationCandidates64",row);
+         // Selector output is reused by the next row, so enqueue its compact
+         // transfer before selecting the next row. All operations remain on
+         // the same stream and preserve graph ordering.
+@@ -2601,6 +2638,7 @@
+           return false;
+         }
+       }
++      fnvcontract::Mark(stream_,"Final compact candidate D2H");
+       // Retain the final full-vocabulary frontier on the owning session. The
+       // next cycle normally samples from the certified compact row; only a
+       // certificate miss downloads this retained row. This removes ~1 MiB of
+@@ -2615,6 +2653,7 @@
+                  "verification frontier retain", error_msg)) {
+         return false;
+       }
++      fnvcontract::Mark(stream_,"Verification frontier retain D2D");
+     } else if (download_logits) {
+       VerifyGpuSpan d2h_span(stream_, fnvprof::VerifySubstage::D2H,
+                              speculative && fnvprof::OnDecode());
+@@ -2780,7 +2819,7 @@
+   if (logits == nullptr) {
+     return true;
+   }
+-  if (!Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize),
++  if (!Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize, 2),
+              "rollback frontier", error_msg)) {
+     return false;
+   }
+@@ -3290,7 +3329,7 @@
+   if (!Check(hipMemcpyAsync(mtp_chain_host_, s_.mtp_chain_tokens,
+                             drafts.size_bytes(), hipMemcpyDeviceToHost, stream_),
+              "async MTP chain download", error_msg) ||
+-      !Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize),
++      !Check(fnvprof::TimedStreamSync(stream_, hipStreamSynchronize, 1),
+              "async MTP chain", error_msg)) {
+     return false;
+   }
+--- /dev/null
++++ b/src/native/hip_timer_contract.hpp
+@@ -0,0 +1,80 @@
++#pragma once
++#include <array>
++#include <cmath>
++#include <cstdlib>
++#include <cstdint>
++#include <windows.h>
++// Windows UI macro collides with the existing sampler DrawState type.
++#ifdef DrawState
++#undef DrawState
++#endif
++#include "src/core/json.hpp"
++
++// Local whole-replay diagnostic only. No internal graph events or extra waits.
++namespace fnvcontract {
++using gufo::json::Value;
++inline double Qpc() {
++  LARGE_INTEGER t,f;QueryPerformanceCounter(&t);QueryPerformanceFrequency(&f);
++  return 1000.0*static_cast<double>(t.QuadPart)/static_cast<double>(f.QuadPart);
++}
++struct Sample {
++  std::uint64_t stream{},exec{},generation{},reuse{},start_seq{},launch_seq{},stop_seq{},wait_begin_seq{},wait_end_seq{},read_seq{}; int launch_status{-1}; std::uint64_t key{}; int start_record{-1},stop_record{-1},start_query{-1},stop_query{-1},elapsed_status{-1};
++  unsigned query_not_ready{},elapsed_not_ready{};
++  double raw_ms{},launch_host_ms{},completion_wall_ms{}; bool finite{},positive{},consumed{};
++};
++struct Round { unsigned rows{},replays{},captures{};double completion_wall_ms{},flag_wait_ms{},ple_wait_ms{}; };
++struct State {
++  int runtime_version{},runtime_status{-1},create_status{};char loaded_module[MAX_PATH]{};
++  bool on{};unsigned samples{},rounds{},overflow{},pending{},peak{},created{};
++  std::array<Sample,1024> sample{};std::array<Round,512> round{};
++  std::array<unsigned,3> sync_count{};std::array<double,3> sync_ms{};
++};
++inline State state;
++inline std::uint64_t sequence=0,wait_begin=0,wait_end=0;
++inline Value topology=Value::array(),launches=Value::array(),batches=Value::array();
++
++
++inline void (*Prepare)()=nullptr;
++inline void (*Collect)()=nullptr;
++inline void (*Finish)()=nullptr;
++inline bool Active(){return state.on;}
++inline void Begin() {
++  state={};launches=Value::array();batches=Value::array();wait_begin=wait_end=0;const char* e=std::getenv("FNV_VERIFY_GRAPH_TOPOLOGY");
++  state.on=e && std::string_view(e)=="1";
++  if(state.on && Prepare)Prepare();
++}
++inline void NoteSync(int reason,double ms){if(Active()){++state.sync_count[reason];state.sync_ms[reason]+=ms;}}
++inline Value Json() {
++  Value j=Value::object();j["enabled"]=state.on;
++  if(!Active())return j;
++  auto num=[](unsigned n){return Value(static_cast<unsigned long long>(n));};
++  j["runtime_version"]=state.runtime_version;j["runtime_status"]=state.runtime_status;j["loaded_module"]=state.loaded_module;j["create_status"]=state.create_status;
++  j["contract"]="DEPENDENCY-BOUND GRAPH COMPLETION WALL TIME";
++  j["gpu_timer_lifecycle"]="standard events; same stream; both events queried after existing completion; consumed before reuse; no added synchronization";
++  j["events_created_lifetime"]=num(state.created);j["pending_end"]=num(state.pending);
++  j["pending_peak"]=num(state.peak);j["overflow"]=num(state.overflow);
++  Value a=Value::array();unsigned valid=0;double total=0;
++  for(unsigned i=0;i<state.samples;++i){auto& s=state.sample[i];Value x=Value::object();
++    x["stream"]=static_cast<unsigned long long>(s.stream);x["exec"]=static_cast<unsigned long long>(s.exec);
++    x["graph_generation"]=static_cast<unsigned long long>(s.generation);x["pair_reuse"]=static_cast<unsigned long long>(s.reuse);
++    x["start_seq"]=static_cast<unsigned long long>(s.start_seq);x["launch_seq"]=static_cast<unsigned long long>(s.launch_seq);x["stop_seq"]=static_cast<unsigned long long>(s.stop_seq);
++    x["wait_begin_seq"]=static_cast<unsigned long long>(s.wait_begin_seq);x["wait_end_seq"]=static_cast<unsigned long long>(s.wait_end_seq);x["read_seq"]=static_cast<unsigned long long>(s.read_seq);x["launch_status"]=s.launch_status;
++    x["key"]=static_cast<unsigned long long>(s.key);x["rows"]=static_cast<unsigned long long>(s.key&65535);
++    x["piece"]=(s.key&(1ULL<<35))?"prefix":"suffix";
++    x["query_not_ready_count"]=num(s.query_not_ready);x["elapsed_not_ready_count"]=num(s.elapsed_not_ready);
++    x["start_record"]=s.start_record;x["stop_record"]=s.stop_record;x["start_query"]=s.start_query;x["stop_query"]=s.stop_query;x["elapsed_status"]=s.elapsed_status;
++    x["raw_elapsed_ms"]=s.finite?Value(s.raw_ms):Value();x["positive"]=s.positive;x["consumed"]=s.consumed;
++    x["launch_host_ms"]=s.launch_host_ms;x["dependency_completion_wall_ms"]=s.completion_wall_ms;
++    const bool ok=s.consumed && s.start_record==0 && s.stop_record==0 && s.start_query==0 && s.stop_query==0 && s.elapsed_status==0 && s.finite && s.positive;
++    x["valid_api_sample"]=ok;if(ok){++valid;total+=s.raw_ms;}a.push_back(x);
++  }
++  j["topology"]=topology;j["launch_sequence"]=launches;j["batches"]=batches;j["samples"]=a;j["replays"]=num(state.samples);j["valid_api_samples"]=num(valid);
++  j["complete_gpu_ms"]=valid==state.samples && !state.overflow ? Value(total):Value();
++  a=Value::array();for(unsigned i=0;i<state.rounds;++i){auto& r=state.round[i];Value x=Value::object();
++    x["rows"]=num(r.rows);x["replays"]=num(r.replays);x["captures"]=num(r.captures);x["dependency_completion_wall_ms"]=r.completion_wall_ms;x["flag_wait_ms"]=r.flag_wait_ms;x["ple_wait_ms"]=r.ple_wait_ms;a.push_back(x);}
++  j["rounds"]=a;a=Value::array();const char* names[]={"other existing stream sync","MTP chain D2H readiness","rollback frontier dependency"};
++  for(unsigned i=0;i<3;++i){Value x=Value::object();x["reason"]=names[i];x["count"]=num(state.sync_count[i]);x["host_ms"]=state.sync_ms[i];a.push_back(x);}j["sync"]=a;
++  j["overlap_note"]="Prefix and suffix launch-to-completion intervals overlap. Use the one-per-verification round intervals for additive attribution. GPU spans overlap host waits; do not add them.";
++  return j;
++}
++}
+--- /dev/null
++++ b/src/native/hip_timer_contract_hip.hpp
+@@ -0,0 +1,65 @@
++#pragma once
++#include "hip_graph_topology.hpp"
++namespace fnvcontract {
++struct Slot{hipEvent_t start{},stop{};int sample{-1};double launch_start{};unsigned reuse{};};
++inline std::array<Slot,8> pool{};
++inline unsigned created=0;inline bool ready=false,broken=false;
++inline void CollectEvents(){
++  if(!Active())return;
++  unsigned pending=0;
++  for(auto& p:pool){if(p.sample==-1)continue;
++    if(p.sample==-2){if(hipEventQuery(p.start)==hipSuccess && hipEventQuery(p.stop)==hipSuccess){float ignored; if(hipEventElapsedTime(&ignored,p.start,p.stop)!=hipErrorNotReady)p.sample=-1;}continue;}
++    auto& s=state.sample[p.sample];
++    const auto b=hipEventQuery(p.start),e=hipEventQuery(p.stop);
++    s.start_query=static_cast<int>(b);s.stop_query=static_cast<int>(e);
++    if(b==hipErrorNotReady || e==hipErrorNotReady){++s.query_not_ready;++pending;continue;}
++    float ms=std::numeric_limits<float>::quiet_NaN();
++    s.read_seq=++sequence;s.wait_begin_seq=wait_begin;s.wait_end_seq=wait_end;auto status=hipEventElapsedTime(&ms,p.start,p.stop);s.elapsed_status=static_cast<int>(status);
++    if(status==hipErrorNotReady){++s.elapsed_not_ready;++pending;continue;}
++    s.raw_ms=ms;s.finite=std::isfinite(ms);s.positive=ms>0;s.consumed=true;p.sample=-1;
++  }
++  state.pending=pending;
++}
++inline void PrepareEvents(){
++  state.runtime_status=static_cast<int>(hipRuntimeGetVersion(&state.runtime_version));
++  GetModuleFileNameA(GetModuleHandleA("amdhip64_7.dll"),state.loaded_module,MAX_PATH);
++  if(!ready && !broken){for(auto& p:pool){
++    auto x=hipEventCreateWithFlags(&p.start,hipEventDefault);
++    if(x!=hipSuccess){state.create_status=x;broken=true;break;}++created;
++    x=hipEventCreateWithFlags(&p.stop,hipEventDefault);
++    if(x!=hipSuccess){state.create_status=x;broken=true;break;}++created;
++  }ready=!broken;}
++  PrepareBatch();state.created=created+4;
++}
++inline void Complete(){
++  const double now=Qpc();
++  // Completion is an existing dependency; timestamp before querying timers.
++  for(auto& p:pool)if(p.sample>=0 && state.sample[p.sample].completion_wall_ms==0)
++    state.sample[p.sample].completion_wall_ms=now-p.launch_start;
++  CollectEvents();CollectBatch();
++}
++inline void FinishEvents(){Complete();for(auto& p:pool)if(p.sample>=0)p.sample=-2;}
++inline void ReleaseEvents(){ReleaseBatch();for(auto& p:pool){if(p.start)(void)hipEventDestroy(p.start);if(p.stop)(void)hipEventDestroy(p.stop);p={};}ready=false;created=0;}
++struct Replay{
++  Slot* slot{};int sample{-1};double start{};
++  Replay(hipStream_t stream,std::uint64_t key,hipGraphExec_t exec){
++    if(Active() && launches.size()<4096){Value x=Value::object();x["seq"]=static_cast<unsigned long long>(++sequence);x["key"]=static_cast<unsigned long long>(key);x["stream"]=Ptr(stream);x["exec"]=Ptr(exec);launches.push_back(x);}
++    BeginBatch(stream,key);
++
++    if(!Relevant(key))return;
++    if(!ready || state.samples>=state.sample.size()){++state.overflow;return;}
++    for(auto& p:pool)if(p.sample==-1){slot=&p;break;}
++    if(!slot){++state.overflow;return;}
++    sample=static_cast<int>(state.samples++);slot->sample=sample;
++    auto& s=state.sample[sample];s.key=key;s.stream=reinterpret_cast<std::uintptr_t>(stream);s.exec=reinterpret_cast<std::uintptr_t>(exec);s.generation=generations[key];s.reuse=++slot->reuse;s.start_seq=++sequence;
++    s.start_record=static_cast<int>(hipEventRecord(slot->start,stream));
++    s.launch_seq=++sequence;start=Qpc();slot->launch_start=start;
++  }
++  void End(hipStream_t stream,hipError_t status){EndBatch(stream);if(!slot)return;auto& s=state.sample[sample];
++    s.launch_host_ms=Qpc()-start;s.launch_status=status;s.stop_seq=++sequence;s.stop_record=static_cast<int>(hipEventRecord(slot->stop,stream));
++    unsigned n=0;for(auto& p:pool)n+=p.sample>=0;state.peak=std::max(state.peak,n);
++  }
++};
++struct Install{Install(){Prepare=PrepareEvents;Collect=Complete;Finish=FinishEvents;}};
++inline Install install;
++}
+--- /dev/null
++++ b/src/native/hip_graph_topology.hpp
+@@ -0,0 +1,63 @@
++#pragma once
++#include <map>
++#include <set>
++#include <vector>
++namespace fnvcontract {
++template<class T> inline Value Ptr(T p){return Value(static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(p)));}
++inline bool Relevant(std::uint64_t k){return Active() && (k&(1ULL<<32)) && !(k&(1ULL<<40)) && ((k&65535)==2 || (k&65535)==3);}
++inline std::map<std::uint64_t,unsigned> generations;
++inline std::set<std::uint64_t> dumped;
++struct Boundary{std::string source;int layer;hipGraphNode_t node;int status;};
++inline std::vector<Boundary> boundaries;
++inline bool capture_labels=false;
++inline void Capture(std::uint64_t key){capture_labels=Relevant(key) && !dumped.contains(key);if(capture_labels)boundaries.clear();}
++inline void Mark(hipStream_t stream,const char* source,int layer=-1){
++  if(!capture_labels)return;hipStreamCaptureStatus status{};unsigned long long id{};hipGraph_t graph{};const hipGraphNode_t* deps=nullptr;size_t count=0;
++  const int code=hipStreamGetCaptureInfo_v2(stream,&status,&id,&graph,&deps,&count);
++  if(code==0 && status==hipStreamCaptureStatusActive){for(size_t i=0;i<count;++i)boundaries.push_back({source,layer,deps[i],code});}
++  else boundaries.push_back({source,layer,nullptr,code});
++}
++inline void Dump(hipGraph_t graph,hipGraphExec_t exec,hipStream_t stream,std::uint64_t key){
++  capture_labels=false;if(!Relevant(key))return;
++  ++generations[key];if(!dumped.insert(key).second)return;
++  Value j=Value::object();j["key"]=static_cast<unsigned long long>(key);j["graph"]=Ptr(graph);j["exec"]=Ptr(exec);j["stream"]=Ptr(stream);j["generation"]=static_cast<int>(generations[key]);
++  unsigned flags=0;j["stream_flags_status"]=static_cast<int>(hipStreamGetFlags(stream,&flags));j["stream_flags"]=static_cast<int>(flags);
++  size_t n=0;j["nodes_count_status"]=static_cast<int>(hipGraphGetNodes(graph,nullptr,&n));std::vector<hipGraphNode_t> nodes(n);
++  j["nodes_status"]=static_cast<int>(hipGraphGetNodes(graph,nodes.data(),&n));
++  std::map<hipGraphNode_t,unsigned> ids;for(unsigned i=0;i<n;++i)ids[nodes[i]]=i;
++  Value a=Value::array();
++  for(unsigned i=0;i<n;++i){Value x=Value::object();x["index"]=static_cast<int>(i);hipGraphNodeType type{};x["type_status"]=static_cast<int>(hipGraphNodeGetType(nodes[i],&type));x["type"]=static_cast<int>(type);
++    size_t count=0;x["dependency_count_status"]=static_cast<int>(hipGraphNodeGetDependencies(nodes[i],nullptr,&count));std::vector<hipGraphNode_t> deps(count);
++    if(count)x["dependency_status"]=static_cast<int>(hipGraphNodeGetDependencies(nodes[i],deps.data(),&count));
++    Value d=Value::array();for(auto p:deps)d.push_back(ids.contains(p)?Value(static_cast<int>(ids[p])):Value(-1));x["dependencies"]=d;
++    if(type==hipGraphNodeTypeKernel){hipKernelNodeParams p{};x["params_status"]=static_cast<int>(hipGraphKernelNodeGetParams(nodes[i],&p));x["function"]=Ptr(p.func);hipFunction_t function{};x["symbol_status"]=static_cast<int>(hipGetFuncBySymbol(&function,p.func));const char* name=function?hipKernelNameRef(function):nullptr;x["kernel"]=name?name:"<unavailable>";
++      Value dims=Value::array();dims.push_back(static_cast<int>(p.gridDim.x));dims.push_back(static_cast<int>(p.gridDim.y));dims.push_back(static_cast<int>(p.gridDim.z));x["grid"]=dims;dims=Value::array();dims.push_back(static_cast<int>(p.blockDim.x));dims.push_back(static_cast<int>(p.blockDim.y));dims.push_back(static_cast<int>(p.blockDim.z));x["block"]=dims;
++    }else if(type==hipGraphNodeTypeMemcpy){hipMemcpy3DParms p{};x["params_status"]=static_cast<int>(hipGraphMemcpyNodeGetParams(nodes[i],&p));x["memcpy_kind"]=static_cast<int>(p.kind);x["width_bytes"]=static_cast<unsigned long long>(p.extent.width);x["height"]=static_cast<unsigned long long>(p.extent.height);x["depth"]=static_cast<unsigned long long>(p.extent.depth);
++    }else if(type==hipGraphNodeTypeGraph){hipGraph_t child{};x["child_status"]=static_cast<int>(hipGraphChildGraphNodeGetGraph(nodes[i],&child));x["child_graph"]=Ptr(child);
++    }else if(type==hipGraphNodeTypeEventRecord || type==hipGraphNodeTypeWaitEvent){hipEvent_t e{};x["event_status"]=static_cast<int>(type==hipGraphNodeTypeEventRecord?hipGraphEventRecordNodeGetEvent(nodes[i],&e):hipGraphEventWaitNodeGetEvent(nodes[i],&e));x["event"]=Ptr(e);}
++    a.push_back(x);
++  }j["nodes"]=a;a=Value::array();for(auto& b:boundaries){Value x=Value::object();x["source"]=b.source;x["layer"]=b.layer;x["last_node"]=ids.contains(b.node)?Value(static_cast<int>(ids[b.node])):Value(-1);x["capture_info_status"]=b.status;a.push_back(x);}j["capture_boundaries"]=a;topology.push_back(j);
++}
++struct Batch {hipEvent_t start{},stop{};bool active{},stopped{},done{};unsigned rows{},count{};std::uint64_t start_seq{},stop_seq{};double wall{};int start_status{-1},stop_status{-1};bool shape_break{};};
++inline std::array<Batch,2> batch{};inline bool batch_ready=false;inline int batch_ending=-1;
++inline void PrepareBatch(){
++  if(!batch_ready){for(auto& b:batch){auto a=hipEventCreateWithFlags(&b.start,0);auto z=hipEventCreateWithFlags(&b.stop,0);if(a!=hipSuccess || z!=hipSuccess){state.create_status=static_cast<int>(a!=hipSuccess?a:z);return;}}batch_ready=true;}
++  for(unsigned i=0;i<2;++i){auto a=batch[i].start,z=batch[i].stop;batch[i]={};batch[i].start=a;batch[i].stop=z;batch[i].rows=i+2;}batch_ending=-1;
++}
++inline void BeginBatch(hipStream_t stream,std::uint64_t key){
++  if(!Active() || !batch_ready || !(key&(1ULL<<32)) || (key&(1ULL<<40)) || (key&(1ULL<<35)))return;
++  const auto rows=static_cast<unsigned>(key&65535);
++  for(auto& b:batch)if(b.active && !b.stopped && b.rows!=rows){b.shape_break=true;b.stop_seq=++sequence;b.stop_status=hipEventRecord(b.stop,stream);b.stopped=true;}
++  if(rows!=2 && rows!=3)return;auto& b=batch[rows-2];if(b.done || b.stopped)return;
++  if(!b.active){b.active=true;b.wall=Qpc();b.start_seq=++sequence;b.start_status=hipEventRecord(b.start,stream);}
++  ++b.count;if(b.count==8)batch_ending=static_cast<int>(rows-2);
++}
++inline void EndBatch(hipStream_t stream){if(batch_ending<0)return;auto& b=batch[batch_ending];b.stop_seq=++sequence;b.stop_status=hipEventRecord(b.stop,stream);b.stopped=true;batch_ending=-1;}
++inline void CollectBatch(){for(auto& b:batch)if(b.active && b.stopped && !b.done){
++  int a=hipEventQuery(b.start),z=hipEventQuery(b.stop);if(a==hipErrorNotReady || z==hipErrorNotReady)continue;
++  float ms=0;int e=hipEventElapsedTime(&ms,b.start,b.stop);if(e==hipErrorNotReady)continue;
++  Value x=Value::object();x["rows"]=static_cast<int>(b.rows);x["suffix_replays"]=static_cast<int>(b.count);x["start_record"]=b.start_status;x["stop_record"]=b.stop_status;x["start_query"]=a;x["stop_query"]=z;x["elapsed_status"]=e;x["raw_elapsed_ms"]=std::isfinite(ms)?Value(ms):Value();x["wall_ms"]=Qpc()-b.wall;x["start_seq"]=static_cast<unsigned long long>(b.start_seq);x["stop_seq"]=static_cast<unsigned long long>(b.stop_seq);x["read_seq"]=static_cast<unsigned long long>(++sequence);x["shape_break"]=b.shape_break;
++  x["scope"]="Inclusive natural interval: matching suffix replays plus intervening prefix/MTP/rollback/host work and existing waits. On shape break includes next prefix. NOT isolated aggregate GPU replay time.";batches.push_back(x);b.done=true;
++}}
++inline void ReleaseBatch(){for(auto& b:batch){if(b.start)(void)hipEventDestroy(b.start);if(b.stop)(void)hipEventDestroy(b.stop);b={};}batch_ready=false;}
++}

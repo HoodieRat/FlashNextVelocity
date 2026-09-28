@@ -1,0 +1,3 @@
+Q4_K rows1/2/3 exact scalar/SwiGLU, guards, nonfinite, routing, graph replay PASS candidate=0
+Q4_K rows1/2/3 exact scalar/SwiGLU, guards, nonfinite, routing, graph replay PASS candidate=1
+candidate2=4 candidate3=4

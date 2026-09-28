@@ -1,0 +1,8 @@
+PASS Q4_K activation reuse rows=2 M=640 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=2 M=640 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=2 M=641 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=2 M=641 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=3 M=640 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=3 M=640 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=3 M=641 K=2560 routing=disjoint/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays
+PASS Q4_K activation reuse rows=3 M=641 K=2560 routing=duplicate/shared/inactive bitwise preparation/output, guards, intervening slot, 3 mutated graph replays

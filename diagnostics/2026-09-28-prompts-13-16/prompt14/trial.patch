@@ -1,0 +1,1987 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,143 +1,150 @@
+-cmake_minimum_required(VERSION 3.30)
+-project(FlashNextVelocityEngine LANGUAGES C CXX HIP)
+-
+-set(CMAKE_C_STANDARD 17)
+-set(CMAKE_CXX_STANDARD 20)
+-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+-set(CMAKE_CXX_EXTENSIONS OFF)
+-set(CMAKE_HIP_STANDARD 20)
+-set(CMAKE_HIP_STANDARD_REQUIRED ON)
+-set(CMAKE_HIP_ARCHITECTURES gfx1151 CACHE STRING "Strix Halo target")
+-
+-if(NOT WIN32)
+-  message(FATAL_ERROR "FlashNextVelocity Engine builds on Windows only")
+-endif()
+-if(NOT CMAKE_HIP_ARCHITECTURES STREQUAL "gfx1151")
+-  message(FATAL_ERROR "This build is intentionally pinned to gfx1151")
+-endif()
+-
+-set(GUFO_ROOT "" CACHE PATH "Pinned Gufo Windows checkout supplied by scripts/build.ps1")
+-if(NOT EXISTS "${GUFO_ROOT}/src/models/qwen38_flash_next/engine.cpp")
+-  message(FATAL_ERROR "Pinned Gufo source is missing. Run BUILD.bat.")
+-endif()
+-
+-# Use the pinned Windows port's POSIX bridge while retaining FlashNextVelocity's
+-# own native runtime and model-specific Windows file handling.
+-include_directories(BEFORE ${GUFO_ROOT}/compat/win32/include)
+-set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -I${GUFO_ROOT}/compat/win32/hip_include")
+-add_compile_definitions(_CRT_DECLARE_NONSTDC_NAMES=0 _CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES)
+-add_link_options(LINKER:/STACK:8388608)
+-add_library(gufo_posix_compat STATIC
+-  ${GUFO_ROOT}/compat/win32/posix.cpp
+-  ${GUFO_ROOT}/compat/win32/spawn.cpp)
+-target_link_libraries(gufo_posix_compat PUBLIC ws2_32 psapi)
+-
+-find_package(Threads REQUIRED)
+-find_package(ICU REQUIRED COMPONENTS uc i18n)
+-find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+-find_package(PNG REQUIRED)
+-find_package(JPEG REQUIRED)
+-find_package(CURL REQUIRED)
+-find_package(hip CONFIG REQUIRED)
+-find_package(hipblas CONFIG REQUIRED)
+-find_package(hipblaslt CONFIG REQUIRED)
+-find_package(rocblas CONFIG REQUIRED)
+-find_path(HIPCUB_INCLUDE_DIR hipcub/hipcub.hpp REQUIRED)
+-find_path(ROCPRIM_INCLUDE_DIR rocprim/rocprim.hpp REQUIRED)
+-find_path(ROCWMMA_INCLUDE_DIR rocwmma/rocwmma.hpp REQUIRED)
+-
+-add_library(fnv_core STATIC
+-  ${GUFO_ROOT}/src/core/gguf_reader.cpp
+-  ${GUFO_ROOT}/src/core/sampling.cpp
+-  ${GUFO_ROOT}/src/core/crypto/sha256.cpp
+-  ${GUFO_ROOT}/src/core/quant/ggml_dequant.cpp
+-  ${GUFO_ROOT}/src/core/image.cpp
+-  ${GUFO_ROOT}/src/core/platform/device_memory.cpp
+-  ${GUFO_ROOT}/src/core/hip/weight_upload.cpp
+-  ${GUFO_ROOT}/src/models/qwen/tokenizer.cpp
+-  ${GUFO_ROOT}/src/models/qwen/chat_template.cpp
+-  ${GUFO_ROOT}/src/models/qwen/vision/prompt.cpp
+-  ${GUFO_ROOT}/src/models/qwen/vision/encoder.hip
+-  ${GUFO_ROOT}/src/models/qwen/vision/device_input.hip
+-  ${GUFO_ROOT}/src/models/qwen/hip/kernels/sample.hip
+-  ${GUFO_ROOT}/src/models/qwen/hip/kernels/hipblaslt_gemm.hip
+-  src/native/win_file.cpp
+-  src/native/win_plan_database.cpp
+-)
+-
+-set_source_files_properties(
+-  ${GUFO_ROOT}/src/models/qwen/vision/encoder.hip
+-  ${GUFO_ROOT}/src/models/qwen/vision/device_input.hip
+-  ${GUFO_ROOT}/src/models/qwen/hip/kernels/sample.hip
+-  ${GUFO_ROOT}/src/models/qwen/hip/kernels/hipblaslt_gemm.hip
+-  PROPERTIES LANGUAGE HIP)
+-
+-set_source_files_properties(
+-  ${GUFO_ROOT}/src/models/qwen/vision/encoder.hip
+-  ${GUFO_ROOT}/src/models/qwen/vision/device_input.hip
+-  ${GUFO_ROOT}/src/models/qwen/hip/kernels/sample.hip
+-  ${GUFO_ROOT}/src/models/qwen/hip/kernels/hipblaslt_gemm.hip
+-  PROPERTIES COMPILE_OPTIONS "-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument")
+-
+-target_include_directories(fnv_core PUBLIC
+-  ${GUFO_ROOT}
+-  ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+-target_include_directories(fnv_core SYSTEM PRIVATE
+-  ${HIPCUB_INCLUDE_DIR}
+-  ${ROCPRIM_INCLUDE_DIR}
+-  ${ROCWMMA_INCLUDE_DIR})
+-target_compile_definitions(fnv_core PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+-target_compile_options(fnv_core PRIVATE
+-  $<$<COMPILE_LANGUAGE:CXX>:-O2>
+-  $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
+-target_link_libraries(fnv_core PUBLIC
+-  Threads::Threads ICU::uc ICU::i18n OpenSSL::Crypto PNG::PNG JPEG::JPEG
+-  CURL::libcurl hip::host roc::hipblas roc::hipblaslt roc::rocblas
+-  gufo_posix_compat ws2_32 bcrypt dxgi)
+-
+-# Gufo's qwen38_flash_next CMakeLists links a target named gufo_core.
+-# Expose our Windows core implementation under that expected target name so
+-# CMake resolves the dependency as a target instead of emitting -lgufo_core.lib.
+-add_library(gufo_core ALIAS fnv_core)
+-
+-set(ENGINE_ENABLE_HIP ON CACHE BOOL "" FORCE)
+-add_subdirectory(${GUFO_ROOT}/src/models/qwen38_flash_next ${CMAKE_BINARY_DIR}/gufo-qwen38)
+-target_include_directories(gufo_qwen38_flash_next PUBLIC ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+-target_compile_definitions(gufo_qwen38_flash_next PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+-if(TARGET gufo_qwen38_flash_next_mmq)
+-  target_include_directories(gufo_qwen38_flash_next_mmq PUBLIC ${GUFO_ROOT})
+-  target_compile_definitions(gufo_qwen38_flash_next_mmq PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+-endif()
+-
+-
+-add_executable(FlashNextQ8ShallowTest tests/q8_shallow_test.hip.cpp)
+-target_compile_options(FlashNextQ8ShallowTest PRIVATE -O2)
+-target_link_libraries(FlashNextQ8ShallowTest PRIVATE gufo_qwen38_flash_next_mmq hip::host)
+-set_target_properties(FlashNextQ8ShallowTest PROPERTIES
+-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+-
+-add_executable(FlashNextVelocityUnitTests tests/native_unit_tests.cpp)
+-target_include_directories(FlashNextVelocityUnitTests PRIVATE
+-  ${GUFO_ROOT}
+-  ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+-target_compile_definitions(FlashNextVelocityUnitTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+-target_compile_options(FlashNextVelocityUnitTests PRIVATE -O2)
+-set_target_properties(FlashNextVelocityUnitTests PROPERTIES
+-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+-
+-add_executable(FlashNextNgramDirectReadTest tests/ngram_direct_read_test.cpp)
+-target_include_directories(FlashNextNgramDirectReadTest PRIVATE
+-  ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+-target_compile_definitions(FlashNextNgramDirectReadTest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+-target_link_libraries(FlashNextNgramDirectReadTest PRIVATE gufo_qwen38_flash_next fnv_core)
+-set_target_properties(FlashNextNgramDirectReadTest PROPERTIES
+-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+-
+-add_executable(FlashNextVelocityEngine src/native/main.cpp)
+-target_include_directories(FlashNextVelocityEngine PRIVATE ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+-target_compile_definitions(FlashNextVelocityEngine PRIVATE ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+-target_compile_options(FlashNextVelocityEngine PRIVATE -O2)
+-target_link_libraries(FlashNextVelocityEngine PRIVATE gufo_qwen38_flash_next fnv_core ws2_32 bcrypt)
+-set_target_properties(FlashNextVelocityEngine PROPERTIES
+-  OUTPUT_NAME "FlashNextVelocity.Engine"
+-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++cmake_minimum_required(VERSION 3.30)
++project(FlashNextVelocityEngine LANGUAGES C CXX HIP)
++
++set(CMAKE_C_STANDARD 17)
++set(CMAKE_CXX_STANDARD 20)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++set(CMAKE_CXX_EXTENSIONS OFF)
++set(CMAKE_HIP_STANDARD 20)
++set(CMAKE_HIP_STANDARD_REQUIRED ON)
++set(CMAKE_HIP_ARCHITECTURES gfx1151 CACHE STRING "Strix Halo target")
++
++if(NOT WIN32)
++  message(FATAL_ERROR "FlashNextVelocity Engine builds on Windows only")
++endif()
++if(NOT CMAKE_HIP_ARCHITECTURES STREQUAL "gfx1151")
++  message(FATAL_ERROR "This build is intentionally pinned to gfx1151")
++endif()
++
++set(GUFO_ROOT "" CACHE PATH "Pinned Gufo Windows checkout supplied by scripts/build.ps1")
++if(NOT EXISTS "${GUFO_ROOT}/src/models/qwen38_flash_next/engine.cpp")
++  message(FATAL_ERROR "Pinned Gufo source is missing. Run BUILD.bat.")
++endif()
++
++# Use the pinned Windows port's POSIX bridge while retaining FlashNextVelocity's
++# own native runtime and model-specific Windows file handling.
++include_directories(BEFORE ${GUFO_ROOT}/compat/win32/include)
++set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -I${GUFO_ROOT}/compat/win32/hip_include")
++add_compile_definitions(_CRT_DECLARE_NONSTDC_NAMES=0 _CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES)
++add_link_options(LINKER:/STACK:8388608)
++add_library(gufo_posix_compat STATIC
++  ${GUFO_ROOT}/compat/win32/posix.cpp
++  ${GUFO_ROOT}/compat/win32/spawn.cpp)
++target_link_libraries(gufo_posix_compat PUBLIC ws2_32 psapi)
++
++find_package(Threads REQUIRED)
++find_package(ICU REQUIRED COMPONENTS uc i18n)
++find_package(OpenSSL REQUIRED COMPONENTS Crypto)
++find_package(PNG REQUIRED)
++find_package(JPEG REQUIRED)
++find_package(CURL REQUIRED)
++find_package(hip CONFIG REQUIRED)
++find_package(hipblas CONFIG REQUIRED)
++find_package(hipblaslt CONFIG REQUIRED)
++find_package(rocblas CONFIG REQUIRED)
++find_path(HIPCUB_INCLUDE_DIR hipcub/hipcub.hpp REQUIRED)
++find_path(ROCPRIM_INCLUDE_DIR rocprim/rocprim.hpp REQUIRED)
++find_path(ROCWMMA_INCLUDE_DIR rocwmma/rocwmma.hpp REQUIRED)
++
++add_library(fnv_core STATIC
++  ${GUFO_ROOT}/src/core/gguf_reader.cpp
++  ${GUFO_ROOT}/src/core/sampling.cpp
++  ${GUFO_ROOT}/src/core/crypto/sha256.cpp
++  ${GUFO_ROOT}/src/core/quant/ggml_dequant.cpp
++  ${GUFO_ROOT}/src/core/image.cpp
++  ${GUFO_ROOT}/src/core/platform/device_memory.cpp
++  ${GUFO_ROOT}/src/core/hip/weight_upload.cpp
++  ${GUFO_ROOT}/src/models/qwen/tokenizer.cpp
++  ${GUFO_ROOT}/src/models/qwen/chat_template.cpp
++  ${GUFO_ROOT}/src/models/qwen/vision/prompt.cpp
++  ${GUFO_ROOT}/src/models/qwen/vision/encoder.hip
++  ${GUFO_ROOT}/src/models/qwen/vision/device_input.hip
++  ${GUFO_ROOT}/src/models/qwen/hip/kernels/sample.hip
++  ${GUFO_ROOT}/src/models/qwen/hip/kernels/hipblaslt_gemm.hip
++  src/native/win_file.cpp
++  src/native/win_plan_database.cpp
++)
++
++set_source_files_properties(
++  ${GUFO_ROOT}/src/models/qwen/vision/encoder.hip
++  ${GUFO_ROOT}/src/models/qwen/vision/device_input.hip
++  ${GUFO_ROOT}/src/models/qwen/hip/kernels/sample.hip
++  ${GUFO_ROOT}/src/models/qwen/hip/kernels/hipblaslt_gemm.hip
++  PROPERTIES LANGUAGE HIP)
++
++set_source_files_properties(
++  ${GUFO_ROOT}/src/models/qwen/vision/encoder.hip
++  ${GUFO_ROOT}/src/models/qwen/vision/device_input.hip
++  ${GUFO_ROOT}/src/models/qwen/hip/kernels/sample.hip
++  ${GUFO_ROOT}/src/models/qwen/hip/kernels/hipblaslt_gemm.hip
++  PROPERTIES COMPILE_OPTIONS "-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument")
++
++target_include_directories(fnv_core PUBLIC
++  ${GUFO_ROOT}
++  ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
++target_include_directories(fnv_core SYSTEM PRIVATE
++  ${HIPCUB_INCLUDE_DIR}
++  ${ROCPRIM_INCLUDE_DIR}
++  ${ROCWMMA_INCLUDE_DIR})
++target_compile_definitions(fnv_core PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
++target_compile_options(fnv_core PRIVATE
++  $<$<COMPILE_LANGUAGE:CXX>:-O2>
++  $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
++target_link_libraries(fnv_core PUBLIC
++  Threads::Threads ICU::uc ICU::i18n OpenSSL::Crypto PNG::PNG JPEG::JPEG
++  CURL::libcurl hip::host roc::hipblas roc::hipblaslt roc::rocblas
++  gufo_posix_compat ws2_32 bcrypt dxgi)
++
++# Gufo's qwen38_flash_next CMakeLists links a target named gufo_core.
++# Expose our Windows core implementation under that expected target name so
++# CMake resolves the dependency as a target instead of emitting -lgufo_core.lib.
++add_library(gufo_core ALIAS fnv_core)
++
++set(ENGINE_ENABLE_HIP ON CACHE BOOL "" FORCE)
++add_subdirectory(${GUFO_ROOT}/src/models/qwen38_flash_next ${CMAKE_BINARY_DIR}/gufo-qwen38)
++target_include_directories(gufo_qwen38_flash_next PUBLIC ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
++target_compile_definitions(gufo_qwen38_flash_next PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
++if(TARGET gufo_qwen38_flash_next_mmq)
++  target_include_directories(gufo_qwen38_flash_next_mmq PUBLIC ${GUFO_ROOT})
++  target_compile_definitions(gufo_qwen38_flash_next_mmq PUBLIC ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
++endif()
++
++
++add_executable(FlashNextQ8ShallowTest tests/q8_shallow_test.hip.cpp)
++target_compile_options(FlashNextQ8ShallowTest PRIVATE -O2)
++target_link_libraries(FlashNextQ8ShallowTest PRIVATE gufo_qwen38_flash_next_mmq hip::host)
++set_target_properties(FlashNextQ8ShallowTest PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++
++add_executable(FlashNextVelocityUnitTests tests/native_unit_tests.cpp)
++target_include_directories(FlashNextVelocityUnitTests PRIVATE
++  ${GUFO_ROOT}
++  ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
++target_compile_definitions(FlashNextVelocityUnitTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
++target_compile_options(FlashNextVelocityUnitTests PRIVATE -O2)
++set_target_properties(FlashNextVelocityUnitTests PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++
++add_executable(FlashNextNgramDirectReadTest tests/ngram_direct_read_test.cpp)
++target_include_directories(FlashNextNgramDirectReadTest PRIVATE
++  ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
++target_compile_definitions(FlashNextNgramDirectReadTest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
++target_link_libraries(FlashNextNgramDirectReadTest PRIVATE gufo_qwen38_flash_next fnv_core)
++set_target_properties(FlashNextNgramDirectReadTest PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++
++add_executable(FlashNextVelocityEngine src/native/main.cpp)
++target_include_directories(FlashNextVelocityEngine PRIVATE ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
++target_compile_definitions(FlashNextVelocityEngine PRIVATE ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
++target_compile_options(FlashNextVelocityEngine PRIVATE -O2)
++target_link_libraries(FlashNextVelocityEngine PRIVATE gufo_qwen38_flash_next fnv_core ws2_32 bcrypt)
++set_target_properties(FlashNextVelocityEngine PROPERTIES
++  OUTPUT_NAME "FlashNextVelocity.Engine"
++  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++
++# Focused Prompt 14 operator check, built through the production build script.
++add_executable(FlashNextQ4SmallRowTest tests/q4_small_row_test.hip.cpp)
++target_compile_options(FlashNextQ4SmallRowTest PRIVATE -O2)
++target_link_libraries(FlashNextQ4SmallRowTest PRIVATE gufo_qwen38_flash_next fnv_core)
++set_target_properties(FlashNextQ4SmallRowTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++add_dependencies(FlashNextVelocityEngine FlashNextQ4SmallRowTest)
+--- a/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
++++ b/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp
+@@ -1,3 +1,4 @@
++#include "mmq/small_row_moe.hpp"
+ #include "src/models/qwen38_flash_next/kernels/rocm/executor.hpp"
+ 
+ #include "bench_profile.hpp"
+@@ -2208,7 +2209,9 @@
+         fnvprof::NoteGraphCapture();
+         QsaBeginHost();
+       }
++      const auto moe_before=fnvmoe::state.executed;
+       const bool ok = body();
++      fnvmoe::Capture(key,moe_before);
+       if (profile) QsaEndHost(key);
+       if (!Check(hipStreamEndCapture(stream_, &captured), "graph capture end",
+                  error_msg) ||
+@@ -2227,6 +2230,7 @@
+       }
+       session.graphs_.emplace(key, exec);
+     }
++    fnvmoe::Replay(key);
+     if (!Check(hipGraphLaunch(exec, stream_), "graph launch", error_msg)) {
+       return false;
+     }
+@@ -2245,6 +2249,7 @@
+                        std::uint32_t n_logits, float* logits, ForwardMode mode,
+                        std::string* error_msg, LogitTransfer transfer) const {
+   const bool speculative = mode == ForwardMode::kVerify;
++  fnvmoe::VerifyScope moe_scope(speculative);
+   if (speculative) VerifyGpuBeginForward();
+   std::uint32_t compact_candidates = 0;
+   switch (transfer) {
+@@ -2382,6 +2387,9 @@
+                             (static_cast<std::uint64_t>(download_logits) << 34) |
+                             (compact_key << 37) |
+                             (fnvprof::OnDecode() ? fnvprof::kProfileGraphBit : 0);
++  const bool moe_profile=speculative && fnvmoe::state.active && fnvprof::OnDecode();
++  const double moe_start=moe_profile?fnvprof::NowMs():0;
++  const double moe_ple=moe_profile?fnvprof::S().ple_wait_ms:0;
+   // PLE first consumes the disk rows at its injection layer. Queue the
+   // preceding layers before waiting, including on captured graph replay.
+   // Both pieces use the same stream and arithmetic as the unsplit graph.
+@@ -2412,9 +2420,11 @@
+     return false;
+   }
+   const bool flag_wait = graph && done_flag_ != nullptr;
+-  if (!Run(session, key, graph, body, error_msg, !flag_wait) ||
+-      (flag_wait && !Wait("forward", error_msg))) {
+-    return false;
++  const bool forward_ok=Run(session, key, graph, body, error_msg, !flag_wait);
++  const double moe_wait=moe_profile?fnvprof::NowMs():0;
++  if (!forward_ok || (flag_wait && !Wait("forward", error_msg))) return false;
++  if(moe_profile){const double done=fnvprof::NowMs();auto& d=fnvmoe::state;
++    if(d.rounds<d.round.size())d.round[d.rounds++]={n,done-moe_start,flag_wait?done-moe_wait:0,fnvprof::S().ple_wait_ms-moe_ple};else ++d.overflow;
+   }
+   if (speculative) {
+     // Decode graphs replay without executing ForwardBody on the host, so the
+--- /dev/null
++++ b/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/mmq/mmvq.hip.cpp
+@@ -0,0 +1,749 @@
++#include "qfn_mmq_prelude.h"
++#include "small_row_moe.hpp"
++namespace qfn_mmq {
++#include "mmvq.hpp"
++#include "unary.hpp"
++#include "vecdotq.hpp"
++
++// Each wave handles up to eight dense inputs for one weight row on gfx1151.
++template<int ncols_dst, bool has_gate, int token_waves = 1, bool ragged = false>
++__launch_bounds__(32 * token_waves, 1) static __global__
++    void mul_mat_vec_q8(const void* __restrict__ weights,
++                        const void* __restrict__ gate,
++                        const block_q8_1* __restrict__ input,
++                        float* __restrict__ output, const uint32_t ncols_x,
++                        const uint32_t nrows_x, const uint32_t stride_col_y,
++                        const uint32_t valid_tokens = ncols_dst) {
++  constexpr int qi = QI8_0;
++  constexpr int vdr = VDR_Q8_0_Q8_1_MMVQ;
++  constexpr int blocks_per_iter = vdr * 32 / qi;
++  const int lane = token_waves > 1 ? threadIdx.x % 32 : threadIdx.x;
++  const int first_token = token_waves > 1 ? threadIdx.x / 32 * ncols_dst : 0;
++  const int row = blockIdx.x;
++  const int blocks_per_row = ncols_x / QK8_0;
++  const int row_offset = row * blocks_per_row;
++  const int kqs = vdr * (lane % (qi / vdr));
++  float sum[ncols_dst] = {};
++  float gate_sum[ncols_dst] = {};
++  for (int kbx = lane / (qi / vdr); kbx < blocks_per_row;
++       kbx += blocks_per_iter) {
++#pragma unroll
++    for (int j = 0; j < ncols_dst; ++j) {
++      // The last wave may contain fewer than eight inputs. Its inactive
++      // columns reuse a valid row; their results are never stored.
++      const int token =
++          ragged ? min(first_token + j, int(valid_tokens) - 1) : first_token + j;
++      sum[j] += vec_dot_q8_0_q8_1(
++          weights, input + token * stride_col_y + kbx,
++          row_offset + kbx, kqs);
++      if constexpr (has_gate) {
++        gate_sum[j] += vec_dot_q8_0_q8_1(gate, input + j * stride_col_y + kbx,
++                                         row_offset + kbx, kqs);
++      }
++    }
++  }
++#pragma unroll
++  for (int j = 0; j < ncols_dst; ++j) {
++    sum[j] = warp_reduce_sum<32>(sum[j]);
++    if constexpr (has_gate)
++      gate_sum[j] = warp_reduce_sum<32>(gate_sum[j]);
++    if (lane == 0 && (token_waves == 1 || first_token + j < valid_tokens)) {
++      float value = sum[j];
++      if constexpr (has_gate)
++        value *= ggml_hip_op_silu_single(gate_sum[j]);
++      output[(first_token + j) * nrows_x + row] = value;
++    }
++  }
++}
++
++// Integer matrix products reuse each Q8 weight across up to 48 inputs.
++// Keep four separate K8 sums per wave: merging them into a K32 integer sum
++// would change the scalar kernel's rounded products, FMA chain and reduction.
++template<int token_tiles, bool ragged>
++__launch_bounds__(256) static __global__ void mul_mat_q8_decode_batch(
++    const block_q8_0* __restrict__ weights,
++    const block_q8_1* __restrict__ input, float* __restrict__ output,
++    int k, int rows, int input_stride, int tokens) {
++  using Int4 = __attribute__((ext_vector_type(4))) int;
++  using Int8 = __attribute__((ext_vector_type(8))) int;
++  __shared__ float partial[16 * 16 * 32];
++  const int wave = threadIdx.x / 32;
++  const int lane = threadIdx.x % 32;
++  const int sub = lane % 16;
++  const int half = lane / 16;
++  const int first_row = blockIdx.x * 16;
++  const int blocks = k / QK8_0;
++  float acc[token_tiles][4][8]{};
++  for (int kb = wave; kb < blocks; kb += 8) {
++    const auto* w = weights + min(first_row + sub, rows - 1) * blocks + kb;
++    const float scale = __half2float(w->d);
++    float scales[8];
++#pragma unroll
++    for (int i = 0; i < 8; ++i)
++      scales[i] = __shfl(scale, 2 * i + half, 32);
++    Int4 codes[4];
++#pragma unroll
++    for (int part = 0; part < 4; ++part)
++      codes[part] = {get_int_b2(w->qs, 2 * part),
++                     get_int_b2(w->qs, 2 * part + 1), 0, 0};
++#pragma unroll
++    for (int tile = 0; tile < token_tiles; ++tile) {
++      const int token = ragged && tile == token_tiles - 1
++                            ? min(tile * 16 + sub, tokens - 1)
++                            : tile * 16 + sub;
++      const auto* x = input + token * input_stride + kb;
++      const float x_scale = __low2float(x->ds);
++#pragma unroll
++      for (int part = 0; part < 4; ++part) {
++        const Int4 values = {get_int_b4(x->qs, 2 * part),
++                              get_int_b4(x->qs, 2 * part + 1), 0, 0};
++        Int8 dots{};
++        dots = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32(
++            true, codes[part], true, values, dots, false);
++#pragma unroll
++        for (int i = 0; i < 8; ++i)
++          acc[tile][part][i] =
++              __fmaf_rn(x_scale, __fmul_rn(scales[i], float(dots[i])),
++                        acc[tile][part][i]);
++      }
++    }
++  }
++  // Reuse the 32 KiB transpose for each token tile. One thread reduces each
++  // output in the original lane-zero tree, avoiding duplicate wave sums.
++#pragma unroll
++  for (int tile = 0; tile < token_tiles; ++tile) {
++#pragma unroll
++    for (int part = 0; part < 4; ++part) {
++#pragma unroll
++      for (int i = 0; i < 8; ++i) {
++        const int out = sub * 16 + 2 * i + half;
++        const int swizzle = (out ^ (out >> 4)) & 31;
++        partial[out * 32 + ((wave * 4 + part) ^ swizzle)] = acc[tile][part][i];
++      }
++    }
++    __syncthreads();
++    const int out = threadIdx.x;
++    const int swizzle = (out ^ (out >> 4)) & 31;
++    float sums[32];
++#pragma unroll
++    for (int i = 0; i < 32; ++i)
++      sums[i] = partial[out * 32 + (i ^ swizzle)];
++#pragma unroll
++    for (int delta = 16; delta; delta /= 2) {
++#pragma unroll
++      for (int i = 0; i < delta; ++i)
++        sums[i] = __fadd_rn(sums[i], sums[i + delta]);
++    }
++    const int row = first_row + out % 16;
++    const int token = tile * 16 + out / 16;
++    if (row < rows && (!ragged || token < tokens))
++      output[token * rows + row] = sums[0];
++    __syncthreads();
++  }
++}
++
++typedef float (*vec_dot_q_hip_t)(const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs);
++
++static constexpr __device__ vec_dot_q_hip_t get_vec_dot_q_hip(ggml_type type) {
++    switch (type) {
++        case GGML_TYPE_Q5_1:    return vec_dot_q5_1_q8_1;
++        case GGML_TYPE_Q8_0:    return vec_dot_q8_0_q8_1;
++        case GGML_TYPE_Q4_K:    return vec_dot_q4_K_q8_1;
++        case GGML_TYPE_Q5_K:    return vec_dot_q5_K_q8_1;
++        case GGML_TYPE_IQ3_S:   return vec_dot_iq3_s_q8_1;
++        case GGML_TYPE_IQ4_XS:  return vec_dot_iq4_xs_q8_1;
++        case GGML_TYPE_IQ4_NL:  return vec_dot_iq4_nl_q8_1;
++        default:                return nullptr;
++    }
++}
++
++static constexpr __host__ __device__ int get_vdr_mmvq(ggml_type type) {
++    switch (type) {
++        case GGML_TYPE_Q5_1:    return VDR_Q5_1_Q8_1_MMVQ;
++        case GGML_TYPE_Q8_0:    return VDR_Q8_0_Q8_1_MMVQ;
++        case GGML_TYPE_Q4_K:    return VDR_Q4_K_Q8_1_MMVQ;
++        case GGML_TYPE_Q5_K:    return VDR_Q5_K_Q8_1_MMVQ;
++        case GGML_TYPE_IQ3_S:   return VDR_IQ3_S_Q8_1_MMVQ;
++        case GGML_TYPE_IQ4_XS:  return VDR_IQ4_XS_Q8_1_MMVQ;
++        case GGML_TYPE_IQ4_NL:  return VDR_IQ4_NL_Q8_1_MMVQ;
++        default:                return 1;
++    }
++}
++
++template<ggml_type type, int c_rows_per_block, bool gated = false>
++__launch_bounds__(mmvq_moe_max_batch(type) * (gated ? 64 : 32),
++                  1) static __global__
++    void mul_mat_vec_q_moe(const void* __restrict__ weights,
++                           const void* __restrict__ vy,
++                           const int32_t* __restrict__ ids,
++                           float* __restrict__ dst, const uint32_t ncols_x,
++                           const uint32_t nrows_x, const uint32_t stride_row_x,
++                           const uint32_t stride_col_y,
++                           const uint32_t stride_col_dst,
++                           const uint32_t stride_channel_x,
++                           const uint32_t stride_channel_dst,
++                           const uint32_t ncols_dst, const uint32_t ids_stride,
++                           const void* __restrict__ up_weights = nullptr) {
++  constexpr int qk = ggml_hip_type_traits<type>::qk;
++  constexpr int qi = ggml_hip_type_traits<type>::qi;
++  constexpr int vdr = get_vdr_mmvq(type);
++  constexpr int warp_size = 32;
++
++  constexpr vec_dot_q_hip_t vec_dot_q_hip = get_vec_dot_q_hip(type);
++
++  const bool is_up = gated && threadIdx.y != 0;
++  const uint32_t token_idx =
++      gated ? 0 : blockIdx.z * blockDim.y + threadIdx.y;
++  const void* vx = is_up ? up_weights : weights;
++  const int row0 = c_rows_per_block * blockIdx.x;
++  const int blocks_per_row_x = ncols_x / qk;
++  constexpr int blocks_per_iter = vdr * warp_size / qi;
++
++  const uint32_t channel_dst = blockIdx.y;
++
++  if (token_idx >= ncols_dst) {
++    return;
++  }
++
++  // Inactive experts still write zero to every output row. The expert ID
++  // and its validity are uniform within a wave.
++  const int32_t id_raw = ids[channel_dst + token_idx * ids_stride];
++  const bool invalid_id = id_raw < 0;
++  const uint32_t channel_x = invalid_id ? 0u : (uint32_t)id_raw;
++
++  const block_q8_1* y = ((const block_q8_1*)vy) + token_idx * stride_col_y;
++  uint32_t row_offsets[c_rows_per_block];
++#pragma unroll
++    for (int i = 0; i < c_rows_per_block; ++i) {
++        // A ragged tile reads the last valid row again for its unused lane.
++        // Keep the bounds check out of the quantized dot-product loop.
++        const uint32_t row = min(uint32_t(row0 + i), nrows_x - 1);
++        row_offsets[i] = channel_x*stride_channel_x + row*stride_row_x;
++    }
++
++    // partial sum for each thread
++    float tmp[c_rows_per_block] = {0.0f};
++
++    for (int kbx = threadIdx.x / (qi/vdr); !invalid_id && kbx < blocks_per_row_x; kbx += blocks_per_iter) {
++        const int kby = kbx * (qk/QK8_1);
++        const int kqs = vdr * (threadIdx.x % (qi/vdr));
++
++#pragma unroll
++        for (int i = 0; i < c_rows_per_block; ++i) {
++            tmp[i] += vec_dot_q_hip(vx, &y[kby], row_offsets[i] + kbx, kqs);
++        }
++    }
++
++    // Warp-level reduction only - no shared memory needed
++#pragma unroll
++    for (int i = 0; i < c_rows_per_block; ++i) {
++        tmp[i] = warp_reduce_sum<warp_size>(tmp[i]);
++    }
++
++    if constexpr (gated) {
++      // Separate waves preserve each projection's original dot-product
++      // grouping. Combining two accumulators in one wave lets fast-math
++      // reassociate their shared input scales.
++      __shared__ float values[2][c_rows_per_block];
++      if (threadIdx.x < c_rows_per_block) {
++        const float value = tmp[threadIdx.x];
++        values[is_up][threadIdx.x] = isfinite(value) ? value : 0.0f;
++      }
++      __syncthreads();
++      if (!is_up && threadIdx.x < c_rows_per_block &&
++          uint32_t(row0 + threadIdx.x) < nrows_x) {
++        const float g = values[0][threadIdx.x];
++        const float u = values[1][threadIdx.x];
++        dst[channel_dst * stride_channel_dst + row0 + threadIdx.x] =
++            (g * (1.0f / (1.0f + __expf(-g)))) * u;
++      }
++      return;
++    }
++
++    // Write results
++    if (threadIdx.x < c_rows_per_block && (c_rows_per_block == 1 || uint32_t(row0 + threadIdx.x) < nrows_x)) {
++        const float value = tmp[threadIdx.x];
++        dst[channel_dst*stride_channel_dst + token_idx*stride_col_dst + row0 + threadIdx.x] =
++            isfinite(value) ? value : 0.0f;
++    }
++}
++
++// Keep one anchor per expert and a slot mask for each token. Duplicate
++// experts share their weights; inactive slots still get explicit zeroes.
++static __global__ void group_moe_slots(const int32_t* ids, int32_t* groups,
++                                       int tokens, int experts_used) {
++  const int anchor = blockIdx.x * blockDim.x + threadIdx.x;
++  if (anchor >= tokens * experts_used)
++    return;
++  const int expert = ids[anchor];
++  int32_t* group = groups + anchor * (tokens + 1);
++  group[0] = -1;
++  if (expert < 0) {
++    group[0] = -2;
++    return;
++  }
++  for (int i = 0; i < anchor; ++i)
++    if (ids[i] == expert)
++      return;
++  group[0] = expert;
++  for (int t = 0; t < tokens; ++t) {
++    uint32_t slots = 0;
++    for (int j = 0; j < experts_used; ++j)
++      if (ids[t * experts_used + j] == expert)
++        slots |= uint32_t{1} << j;
++    group[t + 1] = static_cast<int32_t>(slots);
++  }
++}
++
++
++template<ggml_type type, int tokens, bool single_request = false>
++__launch_bounds__(64) static __global__
++    void mul_mat_vec_moe_grouped(const void* __restrict__ gate,
++                                 const void* __restrict__ up,
++                                 const block_q8_1* __restrict__ input,
++                                 const int32_t* __restrict__ groups,
++                                 float* __restrict__ output, int k, int rows,
++                                 int experts_used, int input_stride) {
++  constexpr int qk = ggml_hip_type_traits<type>::qk;
++  constexpr int qi = ggml_hip_type_traits<type>::qi;
++  constexpr int vdr = get_vdr_mmvq(type);
++  constexpr int blocks_per_iter = vdr * 32 / qi;
++  constexpr auto dot = get_vec_dot_q_hip(type);
++  const int anchor = blockIdx.y;
++  const int tid = threadIdx.x;
++  const int lane = tid % 32;
++  const bool is_up = tid >= 32;
++  const int row0 = blockIdx.x * 2;
++  const int32_t* group = groups + anchor * (tokens + 1);
++  const int expert = group[0];
++  if (expert < 0) {
++    if (!single_request && expert == -2 && tid < 2 && row0 + tid < rows)
++      output[anchor * rows + row0 + tid] = 0.0f;
++    return;
++  }
++
++  constexpr bool split = type == GGML_TYPE_Q4_K && tokens >= 3;
++  constexpr int columns = single_request ? 1 : tokens;
++  int token = 0;
++  if constexpr (split) {
++    int active = 0;
++#pragma unroll
++    for (int t = 0; t < tokens; ++t) {
++      if (group[t + 1] != 0) {
++        ++active;
++        token = t;
++      }
++    }
++    if (single_request ? active != 1 : active <= 1)
++      return;
++  }
++  const void* weights = is_up ? up : gate;
++  const int blocks_per_row = k / qk;
++  uint32_t slots[columns];
++#pragma unroll
++  for (int t = 0; t < columns; ++t)
++    slots[t] = static_cast<uint32_t>(group[(single_request ? token : t) + 1]);
++  float sum[columns][2] = {};
++  for (int kb = lane / (qi / vdr); kb < blocks_per_row; kb += blocks_per_iter) {
++    const int kqs = vdr * (lane % (qi / vdr));
++    if constexpr (split && !single_request) {
++      const Q4MoeFragment w0(
++          weights, (expert * rows + row0) * blocks_per_row + kb, kqs);
++      const Q4MoeFragment w1(
++          weights, (expert * rows + min(row0 + 1, rows - 1)) * blocks_per_row + kb,
++          kqs);
++#pragma unroll
++      for (int t = 0; t < columns; ++t) {
++        if (slots[t] == 0)
++          continue;
++        const auto* x = input + t * input_stride + kb * (qk / QK8_1);
++        sum[t][0] += w0.Dot(x, kqs);
++        sum[t][1] += w1.Dot(x, kqs);
++      }
++    } else {
++#pragma unroll
++      for (int t = 0; t < columns; ++t) {
++        if (slots[t] == 0)
++          continue;
++#pragma unroll
++        for (int r = 0; r < 2; ++r)
++          sum[t][r] += dot(
++              weights,
++              input + (single_request ? token : t) * input_stride +
++                  kb * (qk / QK8_1),
++              (expert * rows + min(row0 + r, rows - 1)) * blocks_per_row + kb,
++              kqs);
++      }
++    }
++  }
++
++  // Gate and up stay in separate waves to retain the scalar projection's
++  // sum order, including the treatment of nonfinite quantization scales.
++  __shared__ float values[columns][2][2];
++#pragma unroll
++  for (int t = 0; t < columns; ++t) {
++    if (slots[t] == 0)
++      continue;
++#pragma unroll
++    for (int r = 0; r < 2; ++r)
++      sum[t][r] = warp_reduce_sum<32>(sum[t][r]);
++    if (lane < 2)
++      values[t][is_up][lane] = isfinite(sum[t][lane]) ? sum[t][lane] : 0.0f;
++  }
++  __syncthreads();
++  if (!is_up && lane < 2 && row0 + lane < rows) {
++#pragma unroll
++    for (int t = 0; t < columns; ++t) {
++      if (slots[t] == 0)
++        continue;
++      const float g = values[t][0][lane];
++      const float u = values[t][1][lane];
++      uint32_t bits = slots[t];
++      while (bits) {
++        const int slot = __ffs(static_cast<int>(bits)) - 1;
++        output[((single_request ? token : t) * experts_used + slot) * rows +
++               row0 + lane] =
++            (g * (1.0f / (1.0f + __expf(-g)))) * u;
++        bits &= bits - 1;
++      }
++    }
++  }
++}
++
++// Group equal experts across the complete request batch. Each distinct token
++// appears once; its mask retains duplicate output slots. The append order
++// affects scheduling only: no two groups write the same output element.
++static __global__ void group_moe_batch(const int32_t* ids, int32_t* storage,
++                                       int tokens, int experts_used) {
++  const int anchor = blockIdx.x * blockDim.x + threadIdx.x;
++  if (anchor >= tokens * experts_used)
++    return;
++  const int expert = ids[anchor];
++  const int first = anchor / experts_used;
++  auto* groups = reinterpret_cast<MoeBatchGroup*>(storage + 1);
++  if (expert < 0) {
++    auto& group = groups[atomicAdd(storage, 1)];
++    group.expert = -2;
++    group.anchor = anchor;
++    return;
++  }
++  for (int j = 0; j < anchor % experts_used; ++j)
++    if (ids[first * experts_used + j] == expert)
++      return;
++  int before = 0;
++  for (int t = 0; t < first; ++t) {
++    bool found = false;
++    for (int j = 0; j < experts_used; ++j)
++      found |= ids[t * experts_used + j] == expert;
++    before += found;
++  }
++  if (before % MMVQ_MAX_BATCH_SIZE != 0)
++    return;
++  auto& group = groups[atomicAdd(storage, 1)];
++  group.expert = expert;
++  group.anchor = anchor;
++  int count = 0;
++  for (int t = first; t < tokens && count < MMVQ_MAX_BATCH_SIZE; ++t) {
++    uint32_t mask = 0;
++    for (int j = 0; j < experts_used; ++j)
++      if (ids[t * experts_used + j] == expert)
++        mask |= uint32_t{1} << j;
++    if (mask) {
++      group.token[count] = t;
++      group.slots[count++] = mask;
++    }
++  }
++  for (; count < MMVQ_MAX_BATCH_SIZE; ++count) {
++    group.token[count] = 0;
++    group.slots[count] = 0;
++  }
++}
++
++
++template<ggml_type type, int tokens = 2>
++static void launch_moe_grouped(const void* gate, const void* up,
++                               const block_q8_1* input, const int32_t* groups,
++                               float* output, int k, int rows, int n_tokens,
++                               int experts_used, int input_stride,
++                               hipStream_t stream) {
++  if (n_tokens == tokens) {
++    mul_mat_vec_moe_grouped<type, tokens>
++        <<<dim3((rows + 1) / 2, tokens * experts_used), 64, 0, stream>>>(
++            gate, up, input, groups, output, k, rows, experts_used,
++            input_stride);
++    if constexpr (type == GGML_TYPE_Q4_K && tokens >= 3) {
++      mul_mat_vec_moe_grouped<type, tokens, true>
++          <<<dim3((rows + 1) / 2, tokens * experts_used), 64, 0, stream>>>(
++              gate, up, input, groups, output, k, rows, experts_used,
++              input_stride);
++    }
++  } else if constexpr (tokens < MMVQ_MAX_BATCH_SIZE) {
++    launch_moe_grouped<type, tokens + 1>(gate, up, input, groups, output, k,
++                                         rows, n_tokens, experts_used,
++                                         input_stride, stream);
++  } else {
++    GGML_ABORT("invalid gated vector batch width");
++  }
++}
++
++template <int tokens>
++static void launch_q8(const void* weights, const void* gate, const block_q8_1* input,
++                      float* output, int k, int rows, int input_stride, hipStream_t stream) {
++    if (gate) {
++        mul_mat_vec_q8<tokens, true><<<rows, 32, 0, stream>>>(
++            weights, gate, input, output, k, rows, input_stride);
++    } else {
++        mul_mat_vec_q8<tokens, false><<<rows, 32, 0, stream>>>(
++            weights, nullptr, input, output, k, rows, input_stride);
++    }
++}
++
++template<int waves>
++static void launch_q8_batch(const void* weights, const block_q8_1* input,
++                            float* output, int k, int rows, int tokens,
++                            int input_stride, hipStream_t stream) {
++  if (tokens % 8 != 0) {
++    mul_mat_vec_q8<8, false, waves, true><<<rows, 32 * waves, 0, stream>>>(
++        weights, nullptr, input, output, k, rows, input_stride, tokens);
++  } else {
++    mul_mat_vec_q8<8, false, waves><<<rows, 32 * waves, 0, stream>>>(
++        weights, nullptr, input, output, k, rows, input_stride, tokens);
++  }
++}
++
++template<int token_tiles>
++static void launch_q8_matrix(const void* weights, const block_q8_1* input,
++                             float* output, int k, int rows, int tokens,
++                             int input_stride, hipStream_t stream) {
++  if (tokens == 16 * token_tiles)
++    mul_mat_q8_decode_batch<token_tiles, false>
++        <<<(rows + 15) / 16, 256, 0, stream>>>(
++            static_cast<const block_q8_0*>(weights), input, output, k, rows,
++            input_stride, tokens);
++  else
++    mul_mat_q8_decode_batch<token_tiles, true>
++        <<<(rows + 15) / 16, 256, 0, stream>>>(
++            static_cast<const block_q8_0*>(weights), input, output, k, rows,
++            input_stride, tokens);
++}
++
++void mul_mat_vec_q8_dispatch(const void* weights, const void* gate,
++                             const block_q8_1* input, float* output, int k,
++                             int rows, int tokens, int input_stride,
++                             hipStream_t stream) {
++  if (!gate && k == 2560 && rows >= 2560 && tokens >= 9 && tokens <= 48) {
++    if (tokens <= 16)
++      launch_q8_matrix<1>(weights, input, output, k, rows, tokens, input_stride,
++                           stream);
++    else if (tokens <= 32)
++      launch_q8_matrix<2>(weights, input, output, k, rows, tokens, input_stride,
++                           stream);
++    else
++      launch_q8_matrix<3>(weights, input, output, k, rows, tokens, input_stride,
++                           stream);
++    return;
++  }
++  GGML_ASSERT(k % QK8_0 == 0 && rows > 0);
++  if (tokens > 8) {
++    GGML_ASSERT(tokens <= 32 && !gate);
++    // Each wave retains the eight-row arithmetic. Adjacent waves work
++    // on the same weight row, reusing cache lines across requests.
++    if (tokens <= 16) {
++      launch_q8_batch<2>(weights, input, output, k, rows, tokens, input_stride,
++                          stream);
++    } else if (tokens <= 24) {
++      launch_q8_batch<3>(weights, input, output, k, rows, tokens, input_stride,
++                          stream);
++    } else {
++      launch_q8_batch<4>(weights, input, output, k, rows, tokens, input_stride,
++                          stream);
++    }
++    return;
++  }
++  switch (tokens) {
++    case 1:
++      launch_q8<1>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 2:
++      launch_q8<2>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 3:
++      launch_q8<3>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 4:
++      launch_q8<4>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 5:
++      launch_q8<5>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 6:
++      launch_q8<6>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 7:
++      launch_q8<7>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    case 8:
++      launch_q8<8>(weights, gate, input, output, k, rows, input_stride, stream);
++      break;
++    default:
++      GGML_ABORT("invalid vector batch width");
++  }
++}
++
++template<ggml_type type, int rows_per_wave = 2>
++static void launch_moe(const void* weights, const block_q8_1* input,
++                       const int32_t* ids, float* output, int k, int rows,
++                       int tokens, int experts_used, int input_stride,
++                       hipStream_t stream) {
++  GGML_ASSERT(k % ggml_blck_size(type) == 0 && rows > 0);
++  GGML_ASSERT(tokens > 0);
++  const int block_tokens = std::min(tokens, mmvq_moe_max_batch(type));
++  const int row_stride = k / ggml_blck_size(type);
++  mul_mat_vec_q_moe<type, rows_per_wave>
++      <<<dim3((rows + rows_per_wave - 1) / rows_per_wave, experts_used,
++              (tokens + block_tokens - 1) / block_tokens),
++         dim3(32, block_tokens), 0, stream>>>(
++          weights, input, ids, output, k, rows, row_stride, input_stride,
++          rows * experts_used, rows * row_stride, rows, tokens, experts_used);
++}
++
++void mul_mat_vec_moe_dispatch(const void* weights, ggml_type type,
++                             const block_q8_1* input, const int32_t* ids, float* output,
++                             int k, int rows, int tokens, int experts_used,
++                             int input_stride, hipStream_t stream) {
++    switch (type) {
++        case GGML_TYPE_Q5_1:
++          // Down projection slots have independent inputs. Wider row tiles
++          // reuse each short input without changing its dot-product sum.
++          if (k == 640 && experts_used == 1 && tokens > 1) {
++            if (tokens > 20) {
++              launch_moe<GGML_TYPE_Q5_1, 8>(
++                  weights, input, ids, output, k, rows, tokens, experts_used,
++                  input_stride, stream);
++            } else {
++              launch_moe<GGML_TYPE_Q5_1, 4>(
++                  weights, input, ids, output, k, rows, tokens, experts_used,
++                  input_stride, stream);
++            }
++            break;
++          }
++            launch_moe<GGML_TYPE_Q5_1>(weights, input, ids, output, k, rows, tokens,
++                                          experts_used, input_stride, stream);
++            break;
++        case GGML_TYPE_Q8_0:
++          // Down projection slots have independent inputs. Four rows reuse
++          // each short input across more weights without changing its sum.
++          if (k == 640 && experts_used == 1 && tokens > 1) {
++            launch_moe<GGML_TYPE_Q8_0, 4>(weights, input, ids, output, k, rows,
++                                          tokens, experts_used, input_stride,
++                                          stream);
++            break;
++          }
++            launch_moe<GGML_TYPE_Q8_0>(weights, input, ids, output, k, rows, tokens,
++                                          experts_used, input_stride, stream);
++            break;
++        case GGML_TYPE_Q4_K:
++            launch_moe<GGML_TYPE_Q4_K>(weights, input, ids, output, k, rows, tokens,
++                                          experts_used, input_stride, stream);
++            break;
++        case GGML_TYPE_Q5_K:
++            launch_moe<GGML_TYPE_Q5_K>(weights, input, ids, output, k, rows, tokens,
++                                          experts_used, input_stride, stream);
++            break;
++        case GGML_TYPE_IQ3_S:
++            launch_moe<GGML_TYPE_IQ3_S>(weights, input, ids, output, k, rows, tokens,
++                                           experts_used, input_stride, stream);
++            break;
++        case GGML_TYPE_IQ4_XS:
++            launch_moe<GGML_TYPE_IQ4_XS>(weights, input, ids, output, k, rows, tokens,
++                                            experts_used, input_stride, stream);
++            break;
++        case GGML_TYPE_IQ4_NL:
++          // The down projection, like Q5_1: short independent inputs reuse
++          // better across four rows per wave.
++          if (k == 640 && experts_used == 1 && tokens > 1) {
++            launch_moe<GGML_TYPE_IQ4_NL, 4>(weights, input, ids, output, k,
++                                            rows, tokens, experts_used,
++                                            input_stride, stream);
++            break;
++          }
++            launch_moe<GGML_TYPE_IQ4_NL>(weights, input, ids, output, k, rows, tokens,
++                                            experts_used, input_stride, stream);
++            break;
++        default: GGML_ABORT("unsupported vector weight format");
++    }
++}
++
++void mul_mat_vec_moe_gated(const void* gate, const void* up, ggml_type type,
++                           const block_q8_1* input, const int32_t* ids,
++                           int32_t* groups, float* output, int k, int rows,
++                           int tokens, int experts_used, int input_stride,
++                           hipStream_t stream) {
++  GGML_ASSERT(tokens > 0 && tokens <= MMVQ_MAX_ROUTED_BATCH);
++  if (type == GGML_TYPE_Q4_K) {
++    const bool small = fnvmoe::Use(tokens);
++    fnvmoe::Note(tokens, small);
++    if (small) {
++      // Reuse the existing exact scalar fused gate/up specialization per token.
++      // Quantization is still performed once for the complete input batch.
++      const int row_stride = k / ggml_blck_size(type);
++      for (int t = 0; t < tokens; ++t) {
++        mul_mat_vec_q_moe<GGML_TYPE_Q4_K, 2, true>
++            <<<dim3((rows + 1) / 2, experts_used), dim3(32, 2), 0, stream>>>(
++                gate, input + t * input_stride, ids + t * experts_used,
++                output + t * experts_used * rows, k, rows, row_stride,
++                input_stride, rows * experts_used, rows * row_stride,
++                rows, 1, experts_used, up);
++      }
++      return;
++    }
++  }
++
++  if (tokens > MMVQ_MAX_BATCH_SIZE) {
++    GGML_ASSERT(type == GGML_TYPE_Q4_K && groups && experts_used <= 32);
++    group_moe_batch<<<(tokens * experts_used + 127) / 128, 128, 0, stream>>>(
++        ids, groups, tokens, experts_used);
++    mul_mat_vec_moe_batch_wave64(gate, up, input, groups, output, k, rows,
++                                 experts_used, input_stride, stream);
++    return;
++  }
++  if (tokens > 1) {
++    GGML_ASSERT(groups && experts_used <= 32);
++    group_moe_slots<<<(tokens * experts_used + 127) / 128, 128, 0, stream>>>(
++        ids, groups, tokens, experts_used);
++    if (type == GGML_TYPE_Q4_K) {
++      launch_moe_grouped<GGML_TYPE_Q4_K>(gate, up, input, groups, output, k,
++                                         rows, tokens, experts_used,
++                                         input_stride, stream);
++    } else if (type == GGML_TYPE_Q8_0) {
++      launch_moe_grouped<GGML_TYPE_Q8_0>(gate, up, input, groups, output, k,
++                                         rows, tokens, experts_used,
++                                         input_stride, stream);
++    } else {
++      GGML_ASSERT(type == GGML_TYPE_Q5_K);
++      launch_moe_grouped<GGML_TYPE_Q5_K>(gate, up, input, groups, output, k,
++                                         rows, tokens, experts_used,
++                                         input_stride, stream);
++    }
++    return;
++  }
++  const int row_stride = k / ggml_blck_size(type);
++  const dim3 grid((rows + 1) / 2, experts_used);
++  const dim3 block(32, 2);
++  if (type == GGML_TYPE_Q4_K) {
++    mul_mat_vec_q_moe<GGML_TYPE_Q4_K, 2, true><<<grid, block, 0, stream>>>(
++        gate, input, ids, output, k, rows, row_stride, input_stride,
++        rows * experts_used, rows * row_stride, rows, 1, experts_used, up);
++  } else if (type == GGML_TYPE_Q8_0) {
++    mul_mat_vec_q_moe<GGML_TYPE_Q8_0, 2, true><<<grid, block, 0, stream>>>(
++        gate, input, ids, output, k, rows, row_stride, input_stride,
++        rows * experts_used, rows * row_stride, rows, 1, experts_used, up);
++  } else {
++    GGML_ASSERT(type == GGML_TYPE_Q5_K);
++    mul_mat_vec_q_moe<GGML_TYPE_Q5_K, 2, true><<<grid, block, 0, stream>>>(
++        gate, input, ids, output, k, rows, row_stride, input_stride,
++        rows * experts_used, rows * row_stride, rows, 1, experts_used, up);
++  }
++}
++
++}  // namespace qfn_mmq
+--- /dev/null
++++ b/gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/mmq/small_row_moe.hpp
+@@ -0,0 +1,33 @@
++#pragma once
++#include <array>
++#include <cstdint>
++#include <cstdlib>
++#include <map>
++#include <string_view>
++
++namespace fnvmoe {
++// Local Prompt 14 A/B gate. Never changes a graph after capture.
++inline bool candidate = [] { const char* p=std::getenv("FNV_Q4_SMALL_ROW"); return p && std::string_view(p)=="1"; }();
++inline thread_local bool verification=false;
++struct VerifyScope { bool before; explicit VerifyScope(bool on):before(verification){verification=on;} ~VerifyScope(){verification=before;} };
++using Counts=std::array<std::uint64_t,5>; // baseline, candidate, candidate2, candidate3, fallback
++struct Round {unsigned rows{}; double wall_ms{},wait_ms{},ple_ms{};};
++struct State {bool active{};Counts executed{},capture_calls{};unsigned rounds{},overflow{},missing_template{},replays{},captures{};std::array<Round,512> round{};};
++inline State state;
++inline std::map<std::uint64_t,Counts> graph_counts;
++inline void Reset(){state={};state.active=true;}
++inline bool Use(int tokens){return candidate && verification && (tokens==2 || tokens==3);}
++inline void Note(int tokens,bool selected){if(!state.active || !verification)return;
++  if(selected){++state.executed[1];++state.executed[tokens==2?2:3];}
++  else {++state.executed[0];if(tokens!=2 && tokens!=3)++state.executed[4];}
++}
++inline bool VerifyKey(std::uint64_t k){return (k&(1ULL<<32)) && !(k&(1ULL<<40));}
++inline void Capture(std::uint64_t key,const Counts& before){if(!state.active || !VerifyKey(key))return;
++  Counts delta{};for(unsigned i=0;i<5;++i){delta[i]=state.executed[i]-before[i];state.capture_calls[i]+=delta[i];}
++  graph_counts[key]=delta;state.executed=before;++state.captures;
++}
++inline void Replay(std::uint64_t key){if(!state.active || !VerifyKey(key))return;
++  ++state.replays;auto it=graph_counts.find(key);if(it==graph_counts.end()){++state.missing_template;return;}
++  for(unsigned i=0;i<5;++i)state.executed[i]+=it->second[i];
++}
++}
+--- a/src/native/main.cpp
++++ b/src/native/main.cpp
+@@ -1,3 +1,4 @@
++#include "moe_small_row_json.hpp"
+ #ifndef NOMINMAX
+ #define NOMINMAX
+ #endif
+@@ -82,8 +83,8 @@
+   std::string mmproj;
+   std::string host{"127.0.0.1"};
+   int port{8080};
+-  std::uint32_t context{131117};
+-  std::uint32_t draft_max{6};
++  std::uint32_t context{131117};
++  std::uint32_t draft_max{6};
+   float draft_confidence{0.0F};
+   std::string mtp_proposal_mode{"halo_greedy"};
+   std::string mtp_draft_vocabulary{"full"};
+@@ -97,10 +98,10 @@
+   std::uint32_t context_lookup_capacity{16};
+   std::string context_lookup_policy{"sticky"};
+   bool memory_guard{true};
+-  double memory_guard_min_available_gib{5.0};
++  double memory_guard_min_available_gib{5.0};
+   std::uint32_t sessions{1};
+   std::size_t default_max_tokens{4096};
+-  bool thinking{false};
++  bool thinking{false};
+   bool preserve_thinking{false};
+   std::string reasoning_effort{"medium"};
+   gufo::sampling::SamplingConfig sampling{
+@@ -118,6 +119,7 @@
+ };
+ 
+ struct Metrics {
++  Value q4_small_row;
+   LookupPolicy lookup_policy{};
+   std::uint32_t lookup_capacity{0};
+   std::uint64_t prompt_tokens{0};
+@@ -1170,6 +1172,7 @@
+ 
+ Value MetricsJson(const Metrics& m) {
+   Value v = Value::object();
++  if(!m.q4_small_row.is_null())v["q4_small_row"]=m.q4_small_row;
+   v["prompt_tokens"] = static_cast<unsigned long long>(m.prompt_tokens);
+   v["completion_tokens"] = static_cast<unsigned long long>(m.completion_tokens);
+   v["max_tokens_requested"] = static_cast<unsigned long long>(m.requested_max_tokens);
+@@ -1585,11 +1588,13 @@
+                   std::int64_t requested_seed = -1,
+                   bool stream = false,
+                   LookupMode lookup_mode = LookupMode::kSticky) {
++    std::lock_guard generation_lock(generation_mutex_);
+     struct ProfileGuard {
+       bool on{false};
+       explicit ProfileGuard(bool enable) : on(enable) {
+         if (!on) return;
+         fnvprof::Reset();
++        fnvmoe::Reset();
+         qfn_q8_shallow_reset();
+         fnvprof::SetEnabled(true);
+         fnvprof::SetPhase(fnvprof::Phase::Prefill);
+@@ -1598,9 +1603,9 @@
+         if (!on) return;
+         fnvprof::SetPhase(fnvprof::Phase::Off);
+         fnvprof::SetEnabled(false);
++        fnvmoe::state.active=false;
+       }
+     } profile_guard(profile);
+-    std::lock_guard generation_lock(generation_mutex_);
+     CheckMemoryFloor("request start");
+     if (!session_->IsValid()) {
+       std::string error;
+@@ -1813,6 +1818,7 @@
+     if (profile) {
+       fnvprof::SetPhase(fnvprof::Phase::Off);
+       m.profile = fnvprof::BuildReport(m.decode_ms);
++      m.q4_small_row=fnvmoe::Json();
+       LogDeviceMemory("after profiled request");
+     }
+     {
+@@ -2215,15 +2221,15 @@
+       v["memory_guard_min_available_gib"] = runtime.cfg().memory_guard_min_available_gib;
+       const auto memory = QueryWindowsMemoryHeadroom();
+       v["memory_available_bytes"] = static_cast<unsigned long long>(memory.available_physical);
+-      v["memory_commit_available_bytes"] = static_cast<unsigned long long>(memory.available_commit);
+-      gufo::platform::DeviceMemorySnapshot device_memory{};
+-      if (gufo::platform::QueryDeviceMemorySnapshot(&device_memory) == hipSuccess) {
+-        Value usage = Value::object();
+-        usage["source"] = device_memory.wddm ? "WDDM" : "HIP fallback";
+-        usage["local_usage_bytes"] = static_cast<unsigned long long>(device_memory.local_usage);
+-        usage["shared_usage_bytes"] = static_cast<unsigned long long>(device_memory.shared_usage);
+-        v["device_memory"] = std::move(usage);
+-      }
++      v["memory_commit_available_bytes"] = static_cast<unsigned long long>(memory.available_commit);
++      gufo::platform::DeviceMemorySnapshot device_memory{};
++      if (gufo::platform::QueryDeviceMemorySnapshot(&device_memory) == hipSuccess) {
++        Value usage = Value::object();
++        usage["source"] = device_memory.wddm ? "WDDM" : "HIP fallback";
++        usage["local_usage_bytes"] = static_cast<unsigned long long>(device_memory.local_usage);
++        usage["shared_usage_bytes"] = static_cast<unsigned long long>(device_memory.shared_usage);
++        v["device_memory"] = std::move(usage);
++      }
+       v["sessions"] = static_cast<unsigned long long>(runtime.cfg().sessions);
+       v["default_max_tokens"] = static_cast<unsigned long long>(runtime.cfg().default_max_tokens);
+       v["thinking"] = runtime.cfg().thinking;
+--- /dev/null
++++ b/src/native/moe_small_row_json.hpp
+@@ -0,0 +1,14 @@
++#pragma once
++#include "src/models/qwen38_flash_next/kernels/rocm/mmq/small_row_moe.hpp"
++#include "src/core/json.hpp"
++namespace fnvmoe {
++inline gufo::json::Value Json(){using gufo::json::Value;Value j=Value::object();
++  auto num=[](std::uint64_t n){return Value(static_cast<unsigned long long>(n));};
++  auto counts=[&](const Counts& c){Value x=Value::object();const char* names[]={"baseline_q4_grouped","candidate_small_row","candidate_rows2","candidate_rows3","fallback_other_rows"};for(int i=0;i<5;++i)x[names[i]]=num(c[i]);return x;};
++  j["candidate_enabled"]=candidate;j["executed_calls"]=counts(state.executed);j["capture_host_calls"]=counts(state.capture_calls);
++  j["counter_contract"]="Actual dispatch callbacks on eager/capture; captured call deltas applied once per graph launch. Capture construction excluded from executed calls.";
++  j["verification_graph_replays"]=num(state.replays);j["verification_graph_captures"]=num(state.captures);j["missing_graph_template"]=num(state.missing_template);j["overflow"]=num(state.overflow);
++  j["timing_contract"]="DEPENDENCY-BOUND GRAPH COMPLETION WALL TIME";Value a=Value::array();
++  for(unsigned i=0;i<state.rounds;++i){auto& r=state.round[i];Value x=Value::object();x["rows"]=num(r.rows);x["completion_wall_ms"]=r.wall_ms;x["flag_wait_ms"]=r.wait_ms;x["ple_wait_ms"]=r.ple_ms;a.push_back(x);}j["rounds"]=a;return j;
++}
++}
+--- /dev/null
++++ b/tests/q4_small_row_test.hip.cpp
+@@ -0,0 +1,720 @@
++#include "src/models/qwen38_flash_next/kernels/rocm/mmq/small_row_moe.hpp"
++#include <hip/hip_fp16.h>
++#include <hip/hip_runtime.h>
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <iostream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
++#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
++
++namespace q = gufo::models::qwen38_flash_next::rocm;
++namespace {
++
++void CheckHip(hipError_t error, const char* operation) {
++  if (error != hipSuccess) {
++    throw std::runtime_error(std::string(operation) + ": " +
++                             hipGetErrorString(error));
++  }
++}
++
++std::uint32_t NextRandom(std::uint32_t* state) noexcept {
++  *state ^= *state << 13;
++  *state ^= *state >> 17;
++  *state ^= *state << 5;
++  return *state;
++}
++
++float Uniform(std::uint32_t* state, float scale) {
++  return scale *
++         static_cast<float>(static_cast<int>(NextRandom(state) & 0xFFFFU) -
++                            32768) /
++         32768.0F;
++}
++
++template<typename T>
++T* Upload(const std::vector<T>& host, std::size_t extra_bytes = 0) {
++  T* device = nullptr;
++  CheckHip(hipMalloc(&device, host.size() * sizeof(T) + extra_bytes + 4096),
++           "hipMalloc");
++  CheckHip(hipMemcpy(device, host.data(), host.size() * sizeof(T),
++                     hipMemcpyHostToDevice),
++           "upload");
++  return device;
++}
++
++template<typename T>
++std::vector<T> Download(const T* device, std::size_t count) {
++  std::vector<T> host(count);
++  CheckHip(
++      hipMemcpy(host.data(), device, count * sizeof(T), hipMemcpyDeviceToHost),
++      "download");
++  return host;
++}
++
++/// Packed expert weights plus their dequantized values [e][m][k].
++struct Experts {
++  std::vector<std::uint8_t> packed;
++  std::vector<float> values;
++};
++
++/// Random Q4_K blocks with the real 6-bit scale/min packing.
++Experts MakeQ4K(std::size_t e, std::size_t m, std::size_t k,
++                std::uint32_t seed) {
++  Experts w;
++  const std::size_t blocks = e * m * (k / 256);
++  w.packed.resize(blocks * 144);
++  w.values.resize(e * m * k);
++  for (std::size_t b = 0; b < blocks; ++b) {
++    std::uint8_t* blk = w.packed.data() + b * 144;
++    const __half d = __float2half(Uniform(&seed, 0.02F) + 0.03F);
++    const __half dmin = __float2half(Uniform(&seed, 0.01F) + 0.015F);
++    std::memcpy(blk, &d, 2);
++    std::memcpy(blk + 2, &dmin, 2);
++    std::uint8_t sc[8];
++    std::uint8_t mn[8];
++    for (int i = 0; i < 8; ++i) {
++      sc[i] = static_cast<std::uint8_t>(NextRandom(&seed) % 64);
++      mn[i] = static_cast<std::uint8_t>(NextRandom(&seed) % 64);
++    }
++    std::uint8_t* scales = blk + 4;
++    for (int i = 0; i < 4; ++i) {
++      scales[i] = static_cast<std::uint8_t>(sc[i] | ((sc[i + 4] >> 4) << 6));
++      scales[i + 4] =
++          static_cast<std::uint8_t>(mn[i] | ((mn[i + 4] >> 4) << 6));
++      scales[i + 8] = static_cast<std::uint8_t>((sc[i + 4] & 0xF) |
++                                                ((mn[i + 4] & 0xF) << 4));
++    }
++    std::uint8_t* qs = blk + 16;
++    for (int i = 0; i < 128; ++i) {
++      qs[i] = static_cast<std::uint8_t>(NextRandom(&seed) & 0xFF);
++    }
++    const float df = __half2float(d);
++    const float mf = __half2float(dmin);
++    for (int j = 0; j < 256; ++j) {
++      const int sb32 = j / 32;
++      const int base = (sb32 / 2) * 32 + (j % 32);
++      const int shift = 4 * (sb32 & 1);
++      const int code = (qs[base] >> shift) & 0xF;
++      w.values[b * 256 + j] =
++          df * static_cast<float>(sc[sb32]) * static_cast<float>(code) -
++          mf * static_cast<float>(mn[sb32]);
++    }
++  }
++  return w;
++}
++
++/// Random Q5_K blocks: the Q4_K header, 32 high-bit bytes, 128 nibble bytes.
++Experts MakeQ5K(std::size_t e, std::size_t m, std::size_t k,
++                std::uint32_t seed) {
++  Experts w;
++  const std::size_t blocks = e * m * (k / 256);
++  w.packed.resize(blocks * 176);
++  w.values.resize(e * m * k);
++  for (std::size_t b = 0; b < blocks; ++b) {
++    std::uint8_t* blk = w.packed.data() + b * 176;
++    const __half d = __float2half(Uniform(&seed, 0.02F) + 0.03F);
++    const __half dmin = __float2half(Uniform(&seed, 0.01F) + 0.015F);
++    std::memcpy(blk, &d, 2);
++    std::memcpy(blk + 2, &dmin, 2);
++    std::uint8_t sc[8];
++    std::uint8_t mn[8];
++    for (int i = 0; i < 8; ++i) {
++      sc[i] = static_cast<std::uint8_t>(NextRandom(&seed) % 64);
++      mn[i] = static_cast<std::uint8_t>(NextRandom(&seed) % 64);
++    }
++    std::uint8_t* scales = blk + 4;
++    for (int i = 0; i < 4; ++i) {
++      scales[i] = static_cast<std::uint8_t>(sc[i] | ((sc[i + 4] >> 4) << 6));
++      scales[i + 4] =
++          static_cast<std::uint8_t>(mn[i] | ((mn[i + 4] >> 4) << 6));
++      scales[i + 8] = static_cast<std::uint8_t>((sc[i + 4] & 0xF) |
++                                                ((mn[i + 4] & 0xF) << 4));
++    }
++    std::uint8_t* qh = blk + 16;
++    for (int i = 0; i < 32; ++i) {
++      qh[i] = static_cast<std::uint8_t>(NextRandom(&seed) & 0xFF);
++    }
++    std::uint8_t* qs = blk + 48;
++    for (int i = 0; i < 128; ++i) {
++      qs[i] = static_cast<std::uint8_t>(NextRandom(&seed) & 0xFF);
++    }
++    const float df = __half2float(d);
++    const float mf = __half2float(dmin);
++    for (int j = 0; j < 256; ++j) {
++      const int sb32 = j / 32;
++      const int base = (sb32 / 2) * 32 + (j % 32);
++      const int shift = 4 * (sb32 & 1);
++      const int code =
++          ((qs[base] >> shift) & 0xF) | (((qh[j % 32] >> sb32) & 1) << 4);
++      w.values[b * 256 + j] =
++          df * static_cast<float>(sc[sb32]) * static_cast<float>(code) -
++          mf * static_cast<float>(mn[sb32]);
++    }
++  }
++  return w;
++}
++
++/// Random Q5_1 blocks: d, m, 32 high bits, 16 packed low nibbles.
++Experts MakeQ5_1(std::size_t e, std::size_t m, std::size_t k,
++                 std::uint32_t seed) {
++  Experts w;
++  const std::size_t blocks = e * m * (k / 32);
++  w.packed.resize(blocks * 24);
++  w.values.resize(e * m * k);
++  for (std::size_t b = 0; b < blocks; ++b) {
++    std::uint8_t* blk = w.packed.data() + b * 24;
++    const __half d = __float2half(Uniform(&seed, 0.02F) + 0.03F);
++    const __half mn = __float2half(Uniform(&seed, 0.5F));
++    std::memcpy(blk, &d, 2);
++    std::memcpy(blk + 2, &mn, 2);
++    const std::uint32_t qh = NextRandom(&seed);
++    std::memcpy(blk + 4, &qh, 4);
++    std::uint8_t* qs = blk + 8;
++    for (int i = 0; i < 16; ++i) {
++      qs[i] = static_cast<std::uint8_t>(NextRandom(&seed) & 0xFF);
++    }
++    const float df = __half2float(d);
++    const float mf = __half2float(mn);
++    for (int j = 0; j < 32; ++j) {
++      const int low = j < 16 ? (qs[j] & 0xF) : (qs[j - 16] >> 4);
++      const int code = low | (static_cast<int>((qh >> j) & 1U) << 4);
++      w.values[b * 32 + j] = df * static_cast<float>(code) + mf;
++    }
++  }
++  return w;
++}
++
++/// Random Q8_0 blocks: d and 32 signed codes.
++Experts MakeQ8_0(std::size_t e, std::size_t m, std::size_t k,
++                 std::uint32_t seed) {
++  Experts w;
++  const std::size_t blocks = e * m * (k / 32);
++  w.packed.resize(blocks * 34);
++  w.values.resize(e * m * k);
++  for (std::size_t b = 0; b < blocks; ++b) {
++    std::uint8_t* blk = w.packed.data() + b * 34;
++    const __half d = __float2half(Uniform(&seed, 0.02F) + 0.03F);
++    std::memcpy(blk, &d, 2);
++    const float df = __half2float(d);
++    for (int j = 0; j < 32; ++j) {
++      const auto q = static_cast<std::int8_t>(NextRandom(&seed) & 0xFF);
++      blk[2 + j] = static_cast<std::uint8_t>(q);
++      w.values[b * 32 + j] = df * static_cast<float>(q);
++    }
++  }
++  return w;
++}
++
++struct Result {
++  double vs_mmq;
++  double vs_ref;
++  double mmq_vs_ref;
++  double scale;
++};
++
++/// Runs the MMQ tier and the F16 route over the same routing and reports
++/// the worst absolute errors of the F16 route against the tier and against
++/// an F64 reference over the dequantized weights (the tier's own F64 gap is
++/// its activation quantization).
++Result Run(q::WeightType type, std::size_t n_tokens, std::size_t used,
++           std::size_t experts, std::size_t m, std::size_t k,
++           std::uint32_t seed, std::uint32_t tile_rows = 48) {
++  const Experts w =
++      type == q::WeightType::kQ4_K   ? MakeQ4K(experts, m, k, seed)
++      : type == q::WeightType::kQ5_K ? MakeQ5K(experts, m, k, seed)
++      : type == q::WeightType::kQ5_1 ? MakeQ5_1(experts, m, k, seed)
++                                     : MakeQ8_0(experts, m, k, seed);
++  const std::size_t slots = n_tokens * used;
++  // Skewed top-k without replacement: the low experts see most rows.
++  std::vector<std::int32_t> ids(slots);
++  std::uint32_t state = seed ^ 0x5A5A5A5AU;
++  for (std::size_t t = 0; t < n_tokens; ++t) {
++    std::vector<std::int32_t> chosen;
++    while (chosen.size() < used) {
++      const std::uint32_t r = NextRandom(&state);
++      const auto e =
++          static_cast<std::int32_t>((r % 3 == 0 ? r / 3 % 4 : r / 3) % experts);
++      if (std::find(chosen.begin(), chosen.end(), e) == chosen.end()) {
++        chosen.push_back(e);
++      }
++    }
++    std::copy(chosen.begin(), chosen.end(), ids.begin() + t * used);
++  }
++  std::vector<float> x(n_tokens * k);
++  for (float& v : x) {
++    v = Uniform(&state, 2.0F);
++  }
++  std::vector<std::uint32_t> counts(experts, 0);
++  for (std::int32_t e : ids) {
++    ++counts[e];
++  }
++  std::uint32_t max_bucket = 0;
++  for (std::uint32_t c : counts) {
++    max_bucket = std::max(max_bucket, (c + 15u) / 16u * 16u);
++  }
++
++  std::uint8_t* d_w = Upload(w.packed);
++  float* d_x = Upload(x);
++  std::int32_t* d_ids = Upload(ids);
++  std::uint32_t* d_counts = Upload(counts);
++  const std::size_t compact = q::RoutedCompactRows(slots, experts);
++  std::vector<std::int32_t> zeros(compact + experts + 1, 0);
++  std::int32_t* d_bounds = Upload(std::vector<std::int32_t>(experts + 1, 0));
++  std::int32_t* d_cursors = Upload(std::vector<std::int32_t>(experts, 0));
++  std::int32_t* d_rows_token = Upload(zeros);
++  std::int32_t* d_rows_slot = Upload(zeros);
++  std::vector<float> zero_out(slots * m, 0.0F);
++  float* d_mmq = Upload(zero_out);
++
++  const auto mmq_raw = type == q::WeightType::kQ4_K   ? qfn_mmq_q4_K_moe_raw
++                       : type == q::WeightType::kQ5_K ? qfn_mmq_q5_K_moe_raw
++                       : type == q::WeightType::kQ5_1 ? qfn_mmq_q5_1_moe_raw
++                                                      : qfn_mmq_q8_0_moe_raw;
++  const int rc =
++      mmq_raw(d_w, d_x, d_ids, d_mmq, static_cast<int>(m), static_cast<int>(k),
++              static_cast<int>(n_tokens), static_cast<int>(experts),
++              static_cast<int>(used), nullptr);
++  if (rc != 0) {
++    throw std::runtime_error("MMQ routed GEMM failed");
++  }
++  // The F16 route over the same assignments: F16 activation rows and the
++  // host-built tile map. `used == 1` (the down projection's view) gathers
++  // slot rows; the gate/up view gathers tokens.
++  q::RoutedCompact(d_ids, d_counts, d_bounds, d_cursors, d_rows_token,
++                   d_rows_slot, static_cast<std::uint32_t>(n_tokens),
++                   static_cast<std::uint32_t>(used),
++                   static_cast<std::uint32_t>(experts), nullptr);
++  std::vector<__half> x_half(x.size());
++  for (std::size_t i = 0; i < x.size(); ++i) {
++    x_half[i] = __float2half(x[i]);
++  }
++  std::vector<std::int32_t> tiles;
++  for (std::size_t e = 0; e < experts; ++e) {
++    const std::uint32_t padded = (counts[e] + 15u) / 16u * 16u;
++    for (std::uint32_t j = 0; j < (padded + tile_rows - 1) / tile_rows; ++j) {
++      tiles.push_back(static_cast<std::int32_t>(e | (j << 16)));
++    }
++  }
++  __half* d_x_half = Upload(x_half);
++  std::int32_t* d_tiles = Upload(tiles);
++  float* d_f16 = Upload(zero_out);
++  if (!q::RoutedF16Gemm(d_w, type, d_x_half, d_tiles,
++                        static_cast<std::uint32_t>(tiles.size()), tile_rows,
++                        d_bounds, d_rows_token, d_rows_slot, nullptr, d_f16,
++                        nullptr, m, k, nullptr)) {
++    throw std::runtime_error("routed F16 GEMM rejected the shape");
++  }
++  // The F16-output route (the up and down projections' rows) must match
++  // the F32 output to F16 rounding.
++  constexpr std::size_t kHalfGuard = 16;
++  const __half half_guard = __float2half(123.0F);
++  __half* d_f16_half =
++      Upload(std::vector<__half>(slots * m + kHalfGuard, half_guard));
++  if (!q::RoutedF16Gemm(d_w, type, d_x_half, d_tiles,
++                        static_cast<std::uint32_t>(tiles.size()), tile_rows,
++                        d_bounds, d_rows_token, d_rows_slot, nullptr, nullptr,
++                        d_f16_half, m, k, nullptr)) {
++    throw std::runtime_error("routed F16 GEMM (F16 out) rejected the shape");
++  }
++  CheckHip(hipDeviceSynchronize(), "routed GEMMs");
++  const auto mmq = Download(d_mmq, slots * m);
++  const auto f16 = Download(d_f16, slots * m);
++  const auto f16_half = Download(d_f16_half, slots * m);
++  if (tile_rows == 64) {
++    std::vector<std::int32_t> narrow_tiles;
++    for (std::size_t e = 0; e < experts; ++e) {
++      const std::uint32_t padded = (counts[e] + 15u) / 16u * 16u;
++      for (std::uint32_t j = 0; j < (padded + 47u) / 48u; ++j) {
++        narrow_tiles.push_back(static_cast<std::int32_t>(e | (j << 16)));
++      }
++    }
++    auto* d_narrow_tiles = Upload(narrow_tiles);
++    if (!q::RoutedF16Gemm(d_w, type, d_x_half, d_narrow_tiles,
++                          static_cast<std::uint32_t>(narrow_tiles.size()), 48,
++                          d_bounds, d_rows_token, d_rows_slot, nullptr, d_f16,
++                          nullptr, m, k, nullptr)) {
++      throw std::runtime_error("routed reference tile rejected");
++    }
++    CheckHip(hipDeviceSynchronize(), "routed tile comparison");
++    const auto narrow = Download(d_f16, slots * m);
++    if (std::memcmp(narrow.data(), f16.data(), f16.size() * sizeof(float)) !=
++        0) {
++      throw std::runtime_error("routed tile widths change output bits");
++    }
++    CheckHip(hipFree(d_narrow_tiles), "free reference tiles");
++  }
++  for (std::size_t i = 0; i < slots * m; ++i) {
++    const __half expected = __float2half(f16[i]);
++    if (std::memcmp(&expected, &f16_half[i], sizeof(__half)) != 0) {
++      throw std::runtime_error("routed F16 output changed rounding");
++    }
++  }
++  const auto half_tail = Download(d_f16_half + slots * m, kHalfGuard);
++  for (__half value : half_tail) {
++    if (std::memcmp(&value, &half_guard, sizeof(__half)) != 0)
++      throw std::runtime_error("routed F16 output overwrote its guard");
++  }
++
++  if (tile_rows == 48 &&
++      (type == q::WeightType::kQ4_K || type == q::WeightType::kQ5_K)) {
++    // Different gate/up weights, with the up scale small enough that these
++    // deliberately large synthetic weights do not overflow the F16 output.
++    auto up = w.packed;
++    const std::size_t block_bytes = type == q::WeightType::kQ4_K ? 144 : 176;
++    for (std::size_t b = 0; b < up.size(); b += block_bytes) {
++      for (std::size_t offset : {0U, 2U}) {
++        __half scale;
++        std::memcpy(&scale, up.data() + b + offset, sizeof(scale));
++        scale = __float2half(__half2float(scale) / 1024.0F);
++        std::memcpy(up.data() + b + offset, &scale, sizeof(scale));
++      }
++    }
++    auto* d_up = Upload(up);
++    auto* d_pair = Upload(std::vector<__half>(slots * m, __float2half(0.0F)));
++    if (!q::RoutedF16Gemm(d_up, type, d_x_half, d_tiles,
++                          static_cast<std::uint32_t>(tiles.size()), tile_rows,
++                          d_bounds, d_rows_token, d_rows_slot, d_f16, nullptr,
++                          d_f16_half, m, k, nullptr)) {
++      throw std::runtime_error("separate routed SwiGLU launch failed");
++    }
++    const auto separate = Download(d_f16_half, slots * m);
++    for (std::uint32_t pair_rows : {64U, 128U}) {
++      std::vector<std::int32_t> gate_tiles;
++      for (std::size_t e = 0; e < experts; ++e) {
++        for (std::uint32_t j = 0; j < (counts[e] + pair_rows - 1) / pair_rows;
++             ++j) {
++          gate_tiles.push_back(static_cast<std::int32_t>(e | (j << 16)));
++        }
++      }
++      auto* d_gate_tiles = Upload(gate_tiles);
++      auto launch_pair = [&] {
++        if (!q::RoutedGatedF16Gemm(
++                d_w, d_up, type, d_x_half, d_gate_tiles,
++                static_cast<std::uint32_t>(gate_tiles.size()), pair_rows,
++                d_bounds, d_rows_token, d_rows_slot, d_pair, m, k, nullptr)) {
++          throw std::runtime_error("paired routed SwiGLU launch failed");
++        }
++      };
++      launch_pair();
++      const auto paired = Download(d_pair, slots * m);
++      for (std::size_t i = 0; i < paired.size(); ++i) {
++        const float a = __half2float(separate[i]);
++        const float b = __half2float(paired[i]);
++        // The independent epilogue permits either sign of zero; every
++        // numerical value must match, including subnormal F16 values.
++        if (!std::isfinite(a) || !std::isfinite(b) || a != b) {
++          throw std::runtime_error(
++              "paired routed SwiGLU differs at " + std::to_string(i) + ": " +
++              std::to_string(a) + " vs " + std::to_string(b));
++        }
++      }
++      launch_pair();
++      const auto replay = Download(d_pair, slots * m);
++      if (std::memcmp(paired.data(), replay.data(),
++                      paired.size() * sizeof(__half)) != 0) {
++        throw std::runtime_error("paired routed SwiGLU replay changed bits");
++      }
++      CheckHip(hipFree(d_gate_tiles), "paired tile map free");
++    }
++    CheckHip(hipFree(d_up), "paired up free");
++    CheckHip(hipFree(d_pair), "paired output free");
++  }
++
++  Result r{0.0, 0.0, 0.0, 0.0};
++  for (std::size_t s = 0; s < slots; ++s) {
++    const std::size_t t = s / used;
++    const std::int32_t e = ids[s];
++    for (std::size_t row = 0; row < m; ++row) {
++      double ref = 0.0;
++      const float* wr = w.values.data() + (e * m + row) * k;
++      const float* xr = x.data() + t * k;
++      for (std::size_t i = 0; i < k; ++i) {
++        ref += static_cast<double>(wr[i]) * xr[i];
++      }
++      const float f = f16[s * m + row];
++      if (!std::isfinite(f)) {
++        throw std::runtime_error("routed F16 output is not finite");
++      }
++      const float v = mmq[s * m + row];
++      r.vs_mmq = std::max(r.vs_mmq, std::abs(static_cast<double>(v - f)));
++      r.vs_ref = std::max(r.vs_ref, std::abs(ref - f));
++      r.mmq_vs_ref = std::max(r.mmq_vs_ref, std::abs(ref - v));
++      r.scale = std::max(r.scale, std::abs(ref));
++    }
++  }
++  std::cout << (type == q::WeightType::kQ4_K   ? "Q4_K"
++                : type == q::WeightType::kQ5_K ? "Q5_K"
++                : type == q::WeightType::kQ5_1 ? "Q5_1"
++                                               : "Q8_0")
++            << " routed n=" << n_tokens << " used=" << used << " E=" << experts
++            << " m=" << m << " k=" << k << ": worst |F16 - MMQ| " << r.vs_mmq
++            << ", worst |F16 - F64| " << r.vs_ref << ", worst |MMQ - F64| "
++            << r.mmq_vs_ref << " (scale " << r.scale << ", widest bucket "
++            << max_bucket << ")\n";
++  for (void* p : {static_cast<void*>(d_w), static_cast<void*>(d_x),
++                  static_cast<void*>(d_ids), static_cast<void*>(d_counts),
++                  static_cast<void*>(d_bounds), static_cast<void*>(d_cursors),
++                  static_cast<void*>(d_rows_token),
++                  static_cast<void*>(d_rows_slot), static_cast<void*>(d_mmq),
++                  static_cast<void*>(d_x_half), static_cast<void*>(d_tiles),
++                  static_cast<void*>(d_f16), static_cast<void*>(d_f16_half)}) {
++    (void)hipFree(p);
++  }
++  return r;
++}
++
++bool Ok(const Result& r) {
++  // The tier quantizes the activations to 8 bits per 32-wide block, the F16
++  // route rounds them (and the dequantized weights) to F16, so the two
++  // agree to the tier's quantization; the F16 route sits well inside it.
++  return r.vs_mmq < 1e-2 * r.scale && r.vs_ref < 2e-3 * r.scale &&
++         r.mmq_vs_ref < 1e-2 * r.scale;
++}
++
++void CheckVectorGrouping(bool down = false) {
++  constexpr int experts = 8;
++  const int cols = down ? 640 : 2560;
++  const int tokens = down ? 640 : 64;
++  const int used = down ? 1 : 3;
++  constexpr std::size_t guard = 16;
++  constexpr float poison = -1234567.0F;
++  const std::vector<q::WeightType> formats{q::WeightType::kQ4_K};
++  std::vector<float> x(tokens * cols);
++  std::uint32_t seed = 37;
++  // Mix ordinary and small activations: saturated SwiGLU alone misses
++  // rounding changes that appear in real predictor inputs.
++  for (std::size_t i = 0; i < x.size(); ++i)
++    x[i] = Uniform(&seed, !down && (i / cols) % 2 ? 1.0F / 128.0F : 2.0F);
++  std::vector<std::int32_t> ids(tokens * used);
++  for (int t = 0; t < tokens; ++t)
++    for (int j = 0; j < used; ++j)
++      ids[t * used + j] =
++          j == 1 || (down && t % 11 == 1) ? -1 : (t + j) % experts;
++  if (!down) {
++    // Exercise both repeated experts across tokens and duplicate slots
++    // within one token; each output must retain its original slot.
++    ids[2] = ids[0];
++    ids[6 * used + 2] = ids[6 * used];
++  }
++  auto* dx = Upload(x);
++  auto* di = Upload(ids);
++  for (int rows : {down ? 2560 : 640, down ? 2561 : 641}) {
++    std::vector<Experts> weights, paired_weights;
++    if (down) {
++      weights = {MakeQ5_1(experts, rows, cols, 17),
++                 MakeQ8_0(experts, rows, cols, 23)};
++      paired_weights = {MakeQ5_1(experts, rows, cols, 79),
++                        MakeQ8_0(experts, rows, cols, 83)};
++    } else {
++      weights = {
++          MakeQ4K(experts, rows, cols, 11), MakeQ5K(experts, rows, cols, 13),
++          MakeQ5_1(experts, rows, cols, 17), MakeQ8_0(experts, rows, cols, 23)};
++      paired_weights = {
++          MakeQ4K(experts, rows, cols, 71), MakeQ5K(experts, rows, cols, 73),
++          MakeQ5_1(experts, rows, cols, 79), MakeQ8_0(experts, rows, cols, 83)};
++    }
++    const std::size_t count = tokens * used * rows;
++    const std::vector<float> dirty(count + 2 * guard, poison);
++    auto* scalar = Upload(dirty);
++    auto* batch = Upload(dirty);
++    auto* paired_scalar = Upload(dirty);
++    auto* paired_batch = Upload(dirty);
++    const auto check_output = [&](const float* device, int n) {
++      const auto output = Download(device, dirty.size());
++      for (std::size_t i = 0; i < output.size(); ++i) {
++        if (i < guard || i >= guard + n * used * rows) {
++          if (output[i] != poison)
++            throw std::runtime_error("routed vector output guard changed");
++          continue;
++        }
++        const std::size_t slot = (i - guard) / rows;
++        const bool zero =
++            ids[slot] < 0 || (ids[slot] == 0 && (i - guard) % rows == 0);
++        if (!std::isfinite(output[i]) || output[i] == poison ||
++            (zero && output[i] != 0.0F))
++          throw std::runtime_error("routed vector did not write a valid row");
++      }
++      return output;
++    };
++    for (std::size_t f = 0; f < formats.size(); ++f) {
++      // Every format starts with an F16 scale. A nonfinite projection must
++      // still produce zero, just as an inactive expert does.
++      const __half infinite_scale = __float2half(INFINITY);
++      std::memcpy(weights[f].packed.data(), &infinite_scale,
++                  sizeof(infinite_scale));
++      std::memcpy(paired_weights[f].packed.data(), &infinite_scale,
++                  sizeof(infinite_scale));
++      auto* wb = Upload(paired_weights[f].packed);
++      auto* w = Upload(weights[f].packed);
++      CheckHip(hipMemcpy(scalar, dirty.data(), dirty.size() * sizeof(float),
++                         hipMemcpyHostToDevice),
++               "poison scalar output");
++      for (int t = 0; t < tokens; ++t)
++        if (qfn_mmq_moe_vec(static_cast<int>(formats[f]), w, dx + t * cols,
++                            di + t * used, scalar + guard + t * used * rows,
++                            rows, cols, 1, experts, used, nullptr))
++          throw std::runtime_error("scalar routed vector launch failed");
++      const auto reference = check_output(scalar, tokens);
++      CheckHip(hipMemcpy(paired_scalar, dirty.data(),
++                         dirty.size() * sizeof(float), hipMemcpyHostToDevice),
++               "poison paired reference");
++      if (qfn_mmq_moe_vec(static_cast<int>(formats[f]), wb, dx, di,
++                          paired_scalar + guard, rows, cols, tokens, experts,
++                          used, nullptr))
++        throw std::runtime_error("paired reference projection failed");
++      const auto reference_b = check_output(paired_scalar, tokens);
++      const auto widths =
++          down ? std::vector{2,  3,  4,  7,  8,   10,  20, 21,
++                             30, 40, 79, 80, 160, 319, 640}
++               : std::vector{2, 3, 4, 7, 8, 9, 16, 31, 32, 33, 64};
++      for (int n : {1,2,3}) {
++        CheckHip(hipMemcpy(batch, dirty.data(), dirty.size() * sizeof(float),
++                           hipMemcpyHostToDevice),
++                 "poison batched output");
++        if (qfn_mmq_moe_vec(static_cast<int>(formats[f]), w, dx, di,
++                            batch + guard, rows, cols, n, experts, used,
++                            nullptr))
++          throw std::runtime_error("batched routed vector launch failed");
++        const auto output = check_output(batch, n);
++        if (std::memcmp(reference.data() + guard, output.data() + guard,
++                        n * used * rows * sizeof(float)) != 0)
++          throw std::runtime_error("routed vector grouping changed format " +
++                                   std::to_string(f) + " width " +
++                                   std::to_string(n));
++      }
++      for (int n : {1,2,3}) {
++        CheckHip(hipMemcpy(batch, dirty.data(), dirty.size() * sizeof(float),
++                           hipMemcpyHostToDevice),
++                 "poison paired gate");
++        CheckHip(hipMemcpy(paired_batch, dirty.data(),
++                           dirty.size() * sizeof(float), hipMemcpyHostToDevice),
++                 "poison paired up");
++        if (qfn_mmq_moe_vec(static_cast<int>(formats[f]), w, dx, di,
++                            batch + guard, rows, cols, n, experts, used,
++                            nullptr, wb, paired_batch + guard))
++          throw std::runtime_error("paired vector projection failed");
++        const auto gate = check_output(batch, n);
++        const auto up = check_output(paired_batch, n);
++        const std::size_t bytes = n * used * rows * sizeof(float);
++        if (std::memcmp(reference.data() + guard, gate.data() + guard, bytes) ||
++            std::memcmp(reference_b.data() + guard, up.data() + guard, bytes))
++          throw std::runtime_error(
++              "paired vector differs from separate projections");
++      }
++      if (formats[f] == q::WeightType::kQ4_K ||
++          formats[f] == q::WeightType::kQ5_K ||
++          formats[f] == q::WeightType::kQ8_0) {
++        // Compare the fused vector path with the original GPU SwiGLU too:
++        // inactive experts, nonfinite scales and a ragged last row must
++        // retain their exact values and output guards.
++        q::Swiglu(scalar + guard, paired_scalar + guard, count, nullptr);
++        const auto gated_reference = Download(scalar, dirty.size());
++        const auto gated_widths =
++            !down && formats[f] == q::WeightType::kQ4_K
++                ? std::vector{1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 31, 32, 33, 64}
++                : std::vector{1, 2, 3, 4, 5, 6, 7, 8};
++        for (int n : {1,2,3}) {
++          CheckHip(hipMemcpy(batch, dirty.data(), dirty.size() * sizeof(float),
++                             hipMemcpyHostToDevice),
++                   "poison gated output");
++          if (qfn_mmq_moe_gated_vec(static_cast<int>(formats[f]), w, wb, dx, di,
++                                    batch + guard, rows, cols, n, experts, used,
++                                    nullptr))
++            throw std::runtime_error("gated vector launch failed");
++          const auto gated = check_output(batch, n);
++          // Exercise the exact chosen dispatch inside a reusable HIP graph.
++          hipStream_t stream{};CheckHip(hipStreamCreateWithFlags(&stream,hipStreamNonBlocking),"stream");
++          CheckHip(hipStreamBeginCapture(stream,hipStreamCaptureModeThreadLocal),"capture");
++          if(qfn_mmq_moe_gated_vec(static_cast<int>(formats[f]),w,wb,dx,di,batch+guard,rows,cols,n,experts,used,stream))throw std::runtime_error("capture dispatch");
++          hipGraph_t graph{};hipGraphExec_t exec{};CheckHip(hipStreamEndCapture(stream,&graph),"end");CheckHip(hipGraphInstantiate(&exec,graph,nullptr,nullptr,0),"instantiate");
++          for(int replay=0;replay<3;++replay){CheckHip(hipGraphLaunch(exec,stream),"replay");CheckHip(hipStreamSynchronize(stream),"complete");auto v=check_output(batch,n);if(std::memcmp(v.data(),gated.data(),v.size()*sizeof(float)))throw std::runtime_error("graph mismatch");}
++          CheckHip(hipGraphExecDestroy(exec),"exec destroy");CheckHip(hipGraphDestroy(graph),"graph destroy");CheckHip(hipStreamDestroy(stream),"stream destroy");
++          if (std::memcmp(gated_reference.data() + guard, gated.data() + guard,
++                          n * used * rows * sizeof(float)) != 0) {
++            for (int i = 0; i < n * used * rows; ++i) {
++              if (std::memcmp(&gated_reference[guard + i], &gated[guard + i],
++                              sizeof(float)) != 0) {
++                std::cerr << "first changed slot/row=" << i
++                          << " expected=" << std::hexfloat
++                          << gated_reference[guard + i]
++                          << " actual=" << gated[guard + i] << std::defaultfloat
++                          << '\n';
++                break;
++              }
++            }
++            throw std::runtime_error(
++                "gated vector changed SwiGLU output for format " +
++                std::to_string(f) + " width " + std::to_string(n) +
++                (down ? " down rows" : " gate rows"));
++          }
++        }
++      }
++      CheckHip(hipFree(wb), "paired weight free");
++      CheckHip(hipFree(w), "grouping weight free");
++    }
++    CheckHip(hipFree(scalar), "scalar output free");
++    CheckHip(hipFree(batch), "batch output free");
++    CheckHip(hipFree(paired_scalar), "paired reference free");
++    CheckHip(hipFree(paired_batch), "paired output free");
++  }
++  CheckHip(hipFree(dx), "grouping input free");
++  CheckHip(hipFree(di), "grouping IDs free");
++}
++
++void CheckPairedMmq() {
++  constexpr int experts = 8, rows = 64, cols = 512, tokens = 65, used = 3;
++  const auto a = MakeQ4K(experts, rows, cols, 11);
++  const auto b = MakeQ4K(experts, rows, cols, 23);
++  std::vector<float> x(tokens * cols);
++  std::uint32_t seed = 37;
++  for (auto& v : x)
++    v = Uniform(&seed, 2.0F);
++  std::vector<std::int32_t> ids(tokens * used);
++  for (int t = 0; t < tokens; ++t)
++    for (int j = 0; j < used; ++j)
++      ids[t * used + j] = (t + j) % experts;
++  auto* wa = Upload(a.packed);
++  auto* wb = Upload(b.packed);
++  auto* dx = Upload(x);
++  auto* di = Upload(ids);
++  const std::vector<float> zeros(tokens * used * rows);
++  auto* ra = Upload(zeros);
++  auto* rb = Upload(zeros);
++  auto* pa = Upload(zeros);
++  auto* pb = Upload(zeros);
++  if (qfn_mmq_q4_K_moe_raw(wa, dx, di, ra, rows, cols, tokens, experts, used,
++                           nullptr) ||
++      qfn_mmq_q4_K_moe_raw(wb, dx, di, rb, rows, cols, tokens, experts, used,
++                           nullptr) ||
++      qfn_mmq_q4_K_moe_pair_unique(wa, wb, dx, di, pa, pb, rows, cols, tokens,
++                                   experts, used, nullptr)) {
++    throw std::runtime_error("paired MMQ launch failed");
++  }
++  const bool equal = Download(ra, zeros.size()) == Download(pa, zeros.size()) &&
++                     Download(rb, zeros.size()) == Download(pb, zeros.size());
++  for (void* ptr :
++       {static_cast<void*>(wa), static_cast<void*>(wb), static_cast<void*>(dx),
++        static_cast<void*>(di), static_cast<void*>(ra), static_cast<void*>(rb),
++        static_cast<void*>(pa), static_cast<void*>(pb)})
++    CheckHip(hipFree(ptr), "paired MMQ free");
++  if (!equal)
++    throw std::runtime_error("paired MMQ differs from separate projections");
++}
++
++}  // namespace
++
++int main(){try{
++  fnvmoe::Reset();fnvmoe::VerifyScope verify(true);
++  for(bool enabled:{false,true}){fnvmoe::candidate=enabled;CheckVectorGrouping(false);std::cout<<"Q4_K rows1/2/3 exact scalar/SwiGLU, guards, nonfinite, routing, graph replay PASS candidate="<<enabled<<"\n";}
++  if(!fnvmoe::state.executed[2] || !fnvmoe::state.executed[3])return 2;
++  std::cout<<"candidate2="<<fnvmoe::state.executed[2]<<" candidate3="<<fnvmoe::state.executed[3]<<"\n";return 0;
++}catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}}
