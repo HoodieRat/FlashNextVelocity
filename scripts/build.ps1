@@ -302,6 +302,12 @@ if(-not(Test-Path $UnitTests)){throw 'Native unit-test executable missing after 
 & $UnitTests
 if($LASTEXITCODE -ne 0){throw 'Native MTP/context-lookup/profiler unit tests failed.'}
 Write-Host 'Native MTP/context-lookup/profiler unit tests passed.' -ForegroundColor Green
+& cmake.exe --build $Build --target FlashNextQ8ShallowTest -j 16;if($LASTEXITCODE -ne 0){throw 'Q8 shallow operator-test build failed.'}
+$Q8Test=Join-Path $Build 'bin\FlashNextQ8ShallowTest.exe'
+if(-not(Test-Path $Q8Test)){throw 'Q8 shallow operator-test executable missing after build.'}
+& $Q8Test
+if($LASTEXITCODE -ne 0){throw 'Q8 shallow operator tests failed.'}
+Write-Host 'Q8 shallow operator tests passed.' -ForegroundColor Green
 }
 & cmake.exe --build $Build --target FlashNextVelocityEngine -j 16;if($LASTEXITCODE -ne 0){throw 'Native engine build failed.'}
 $EngineBin=Join-Path $Build 'bin';$EngineExe=Join-Path $EngineBin 'FlashNextVelocity.Engine.exe';if(-not(Test-Path $EngineExe)){throw 'Native engine executable missing after build.'}
@@ -312,10 +318,10 @@ $engineAscii=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($EngineExe
 if($engineAscii.Contains($legacyCompactFatal)){
   throw 'Native engine validation failed: built EXE still contains the legacy compact-verification fatal. Stale object reuse detected.'
 }
-if(-not $engineAscii.Contains('fnv-async-halo-pipeline-v12')){
+if(-not $engineAscii.Contains('fnv-mtp-cache-replay-v13')){
   throw 'Native engine validation failed: current runtime revision marker is missing from the built EXE.'
 }
-Write-Host 'Native engine source revision verified: fnv-async-halo-pipeline-v12; async MTP chain, grouped MTP hnorm, and retained verification frontier active.' -ForegroundColor Green
+Write-Host 'Native engine source revision verified: fnv-mtp-cache-replay-v13; async MTP chain, grouped MTP hnorm, and retained verification frontier active.' -ForegroundColor Green
 $engineAscii=$null
 
 # Desktop app.
@@ -357,7 +363,7 @@ $DistConfig=Join-Path $Dist 'config.json'
 if($null -ne $PreservedConfig){
   [IO.File]::WriteAllText($DistConfig,$PreservedConfig,[Text.UTF8Encoding]::new($false))
 }else{
-  $defaultConfig=@{model='';mtp='';mmproj='';host='127.0.0.1';port=8080;context=131117;draft_max=6;draft_confidence=0.0;mtp_proposal_mode='halo_greedy';mtp_draft_vocabulary='latin';prefill_batch=2048;context_lookup=$true;context_lookup_min_ngram=3;context_lookup_max_ngram=6;context_lookup_window=32768;context_lookup_min_draft=6;context_lookup_max_draft=16;context_lookup_capacity=16;context_lookup_policy='sticky';memory_guard=$true;memory_guard_min_available_gib=5.0;sessions=1;default_max_tokens=4096;thinking=$false;preserve_thinking=$false;reasoning_effort='medium';sampling=@{temperature=.35;top_p=.90;top_k=40;min_p=.05;repeat_penalty=1.05;frequency_penalty=0;presence_penalty=0;repeat_last_n=512}}|ConvertTo-Json -Depth 5
+  $defaultConfig=@{model='';mtp='';mmproj='';host='127.0.0.1';port=8080;context=32768;draft_max=7;draft_confidence=0.75;mtp_proposal_mode='distribution';mtp_draft_vocabulary='latin';prefill_batch=4096;context_lookup=$true;context_lookup_min_ngram=5;context_lookup_max_ngram=7;context_lookup_window=32768;context_lookup_min_draft=6;context_lookup_max_draft=16;context_lookup_capacity=16;context_lookup_policy='sticky';memory_guard=$true;memory_guard_min_available_gib=5.0;sessions=1;default_max_tokens=4096;thinking=$false;preserve_thinking=$false;reasoning_effort='medium';sampling=@{temperature=.35;top_p=.90;top_k=20;min_p=0;repeat_penalty=1;frequency_penalty=0;presence_penalty=0;repeat_last_n=512;seed=-1}}|ConvertTo-Json -Depth 5
   [IO.File]::WriteAllText($DistConfig,$defaultConfig,[Text.UTF8Encoding]::new($false))
 }
 if($null -ne $PreservedUi){

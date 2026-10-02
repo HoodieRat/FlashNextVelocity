@@ -136,3 +136,5 @@ if(Test-Path $Dist){
 Write-Host "ROCm:        $ProjectRocm" -ForegroundColor Green
 Write-Host "hipBLASLt:   $($hiplt.FullName)" -ForegroundColor Green
 Write-Host "Tensile DB:  $($db.Name)" -ForegroundColor Green
+# robocopy uses 0-7 for success. Do not leak that code to BUILD.bat.
+exit 0

@@ -110,6 +110,12 @@ if(TARGET gufo_qwen38_flash_next_mmq)
 endif()
 
 
+add_executable(FlashNextQ8ShallowTest tests/q8_shallow_test.hip.cpp)
+target_compile_options(FlashNextQ8ShallowTest PRIVATE -O2)
+target_link_libraries(FlashNextQ8ShallowTest PRIVATE gufo_qwen38_flash_next_mmq hip::host)
+set_target_properties(FlashNextQ8ShallowTest PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 add_executable(FlashNextVelocityUnitTests tests/native_unit_tests.cpp)
 target_include_directories(FlashNextVelocityUnitTests PRIVATE
   ${GUFO_ROOT}
@@ -117,6 +123,14 @@ target_include_directories(FlashNextVelocityUnitTests PRIVATE
 target_compile_definitions(FlashNextVelocityUnitTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_options(FlashNextVelocityUnitTests PRIVATE -O2)
 set_target_properties(FlashNextVelocityUnitTests PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+add_executable(FlashNextNgramDirectReadTest tests/ngram_direct_read_test.cpp)
+target_include_directories(FlashNextNgramDirectReadTest PRIVATE
+  ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+target_compile_definitions(FlashNextNgramDirectReadTest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(FlashNextNgramDirectReadTest PRIVATE gufo_qwen38_flash_next fnv_core)
+set_target_properties(FlashNextNgramDirectReadTest PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 add_executable(FlashNextVelocityEngine src/native/main.cpp)
@@ -127,3 +141,15 @@ target_link_libraries(FlashNextVelocityEngine PRIVATE gufo_qwen38_flash_next fnv
 set_target_properties(FlashNextVelocityEngine PROPERTIES
   OUTPUT_NAME "FlashNextVelocity.Engine"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+add_executable(FlashNextMtpReplayTest tests/mtp_replay_test.cpp)
+target_link_libraries(FlashNextMtpReplayTest PRIVATE gufo_qwen38_flash_next fnv_core)
+target_include_directories(FlashNextMtpReplayTest PRIVATE ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+target_compile_definitions(FlashNextMtpReplayTest PRIVATE ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(FlashNextMtpReplayTest PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+add_executable(FlashNextMtpCostProbe tests/mtp_cost_probe.cpp tests/mtp_cost_audit.cpp)
+target_link_libraries(FlashNextMtpCostProbe PRIVATE gufo_qwen38_flash_next fnv_core)
+target_include_directories(FlashNextMtpCostProbe PRIVATE ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+target_compile_definitions(FlashNextMtpCostProbe PRIVATE ENGINE_ENABLE_HIP=1 NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(FlashNextMtpCostProbe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

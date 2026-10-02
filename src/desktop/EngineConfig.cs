@@ -21,15 +21,16 @@ internal sealed class EngineConfig
     [JsonPropertyName("mmproj")] public string Mmproj { get; set; } = "";
     [JsonPropertyName("host")] public string Host { get; set; } = "127.0.0.1";
     [JsonPropertyName("port")] public int Port { get; set; } = 8080;
-    [JsonPropertyName("context")] public uint Context { get; set; } = 131117;
-    [JsonPropertyName("draft_max")] public uint DraftMax { get; set; } = 6;
-    [JsonPropertyName("draft_confidence")] public double DraftConfidence { get; set; } = 0;
-    [JsonPropertyName("mtp_draft_vocabulary")] public string MtpDraftVocabulary { get; set; } = "";
-    [JsonPropertyName("mtp_proposal_mode")] public string MtpProposalMode { get; set; } = "halo_greedy";
-    [JsonPropertyName("prefill_batch")] public uint PrefillBatch { get; set; } = 2048;
+    // Measured Windows baseline; see LOOKUP-POLICY-REPORT.md for qualification.
+    [JsonPropertyName("context")] public uint Context { get; set; } = 32768;
+    [JsonPropertyName("draft_max")] public uint DraftMax { get; set; } = 7;
+    [JsonPropertyName("draft_confidence")] public double DraftConfidence { get; set; } = 0.75;
+    [JsonPropertyName("mtp_draft_vocabulary")] public string MtpDraftVocabulary { get; set; } = "latin";
+    [JsonPropertyName("mtp_proposal_mode")] public string MtpProposalMode { get; set; } = "distribution";
+    [JsonPropertyName("prefill_batch")] public uint PrefillBatch { get; set; } = 4096;
     [JsonPropertyName("context_lookup")] public bool ContextLookup { get; set; } = true;
-    [JsonPropertyName("context_lookup_min_ngram")] public uint ContextLookupMinNgram { get; set; } = 3;
-    [JsonPropertyName("context_lookup_max_ngram")] public uint ContextLookupMaxNgram { get; set; } = 6;
+    [JsonPropertyName("context_lookup_min_ngram")] public uint ContextLookupMinNgram { get; set; } = 5;
+    [JsonPropertyName("context_lookup_max_ngram")] public uint ContextLookupMaxNgram { get; set; } = 7;
     [JsonPropertyName("context_lookup_window")] public uint ContextLookupWindow { get; set; } = 32768;
     [JsonPropertyName("context_lookup_min_draft")] public uint ContextLookupMinDraft { get; set; } = 6;
     [JsonPropertyName("context_lookup_max_draft")] public uint ContextLookupMaxDraft { get; set; } = 16;
@@ -48,6 +49,7 @@ internal sealed class EngineConfig
     [JsonPropertyName("thinking")] public bool Thinking { get; set; } = false;
     [JsonPropertyName("preserve_thinking")] public bool PreserveThinking { get; set; } = false;
     [JsonPropertyName("reasoning_effort")] public string ReasoningEffort { get; set; } = "medium";
+    [JsonPropertyName("agent_prompt")] public string AgentPrompt { get; set; } = AgentPromptDefaults.CodingAndSvg;
     [JsonPropertyName("sampling")] public SamplingConfig Sampling { get; set; } = new();
 
     [JsonIgnore] public string BaseUrl => $"http://{(Host == "0.0.0.0" ? "127.0.0.1" : Host)}:{Port}";
@@ -77,7 +79,7 @@ internal sealed class EngineConfig
                ?? throw new InvalidOperationException("Could not clone engine configuration.");
     }
 
-    public bool EquivalentTo(EngineConfig? other)
+    public bool EquivalentTo(EngineConfig? other, bool includeAgentPrompt = true)
     {
         if (other is null) return false;
         Normalize();
@@ -108,6 +110,7 @@ internal sealed class EngineConfig
             && Thinking == other.Thinking
             && PreserveThinking == other.PreserveThinking
             && string.Equals(ReasoningEffort, other.ReasoningEffort, StringComparison.OrdinalIgnoreCase)
+            && (!includeAgentPrompt || AgentPrompt == other.AgentPrompt)
             && Sampling.EquivalentTo(other.Sampling);
     }
 
@@ -165,6 +168,7 @@ internal sealed class EngineConfig
             ? "medium"
             : ReasoningEffort.Trim().ToLowerInvariant();
         Sampling ??= new SamplingConfig();
+        AgentPrompt ??= "";
     }
 
     private void Validate()
@@ -188,8 +192,9 @@ internal sealed class EngineConfig
             throw new InvalidOperationException("Prefill batch must be from 128 to 4096.");
         if (ContextLookup && (ContextLookupMinNgram < 2 || ContextLookupMaxNgram < ContextLookupMinNgram || ContextLookupMaxNgram > 32))
             throw new InvalidOperationException("Context lookup n-gram range is invalid.");
-        if (ContextLookupMinDraft < 1 || ContextLookupMaxDraft > 16 || ContextLookupMinDraft > ContextLookupMaxDraft)
-            throw new InvalidOperationException("Lookup draft range must satisfy 1 <= minimum <= maximum <= 16.");
+        if (ContextLookupMinDraft < 1 || ContextLookupMaxDraft > 16 ||
+            ContextLookupMinDraft > ContextLookupMaxDraft)
+            throw new InvalidOperationException("Context lookup draft range must satisfy 1 <= minimum <= maximum <= 16.");
         if (!double.IsFinite(MemoryGuardMinAvailableGiB) || MemoryGuardMinAvailableGiB is < 0 or > 128)
             throw new InvalidOperationException("Memory guard floor must be from 0 to 128 GiB.");
         if (Sessions != 1) throw new InvalidOperationException("This Windows runtime currently requires sessions=1.");
@@ -229,12 +234,13 @@ internal sealed class SamplingConfig
 {
     [JsonPropertyName("temperature")] public double Temperature { get; set; } = 0.35;
     [JsonPropertyName("top_p")] public double TopP { get; set; } = 0.90;
-    [JsonPropertyName("top_k")] public int TopK { get; set; } = 40;
-    [JsonPropertyName("min_p")] public double MinP { get; set; } = 0.05;
-    [JsonPropertyName("repeat_penalty")] public double RepeatPenalty { get; set; } = 1.05;
+    [JsonPropertyName("top_k")] public int TopK { get; set; } = 20;
+    [JsonPropertyName("min_p")] public double MinP { get; set; } = 0;
+    [JsonPropertyName("repeat_penalty")] public double RepeatPenalty { get; set; } = 1;
     [JsonPropertyName("frequency_penalty")] public double FrequencyPenalty { get; set; } = 0;
     [JsonPropertyName("presence_penalty")] public double PresencePenalty { get; set; } = 0;
     [JsonPropertyName("repeat_last_n")] public int RepeatLastN { get; set; } = 512;
+    [JsonPropertyName("seed")] public long Seed { get; set; } = -1;
 
     public bool EquivalentTo(SamplingConfig? other) => other is not null
         && Near(Temperature, other.Temperature)
@@ -244,7 +250,8 @@ internal sealed class SamplingConfig
         && Near(RepeatPenalty, other.RepeatPenalty)
         && Near(FrequencyPenalty, other.FrequencyPenalty)
         && Near(PresencePenalty, other.PresencePenalty)
-        && RepeatLastN == other.RepeatLastN;
+        && RepeatLastN == other.RepeatLastN
+        && Seed == other.Seed;
 
     public void Validate()
     {
@@ -255,6 +262,7 @@ internal sealed class SamplingConfig
         if (!double.IsFinite(RepeatPenalty) || RepeatPenalty <= 0) throw new InvalidOperationException("Repeat penalty must be finite and positive.");
         if (!double.IsFinite(FrequencyPenalty) || !double.IsFinite(PresencePenalty)) throw new InvalidOperationException("Frequency and presence penalties must be finite.");
         if (RepeatLastN < 0) throw new InvalidOperationException("Repeat last N must be nonnegative.");
+        if (Seed is < -1 or > 9007199254740991) throw new InvalidOperationException("Seed must be -1 (random) or a nonnegative JSON-safe integer.");
     }
 
     private static bool Near(double a, double b) => Math.Abs(a - b) <= 1e-9;

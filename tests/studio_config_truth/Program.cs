@@ -12,6 +12,89 @@ internal static class Program
     private static JsonNode Node(object value) => JsonSerializer.SerializeToNode(value, JsonUtil.Options)!;
     private static void Write(string name, object value) => File.WriteAllText(Path.Combine(Output, name + ".json"), JsonSerializer.Serialize(value, JsonUtil.Options));
 
+    private static void TestAgentPrompt(EngineConfig production)
+    {
+        using var form = new MainForm(Array.Empty<string>(), production.Clone(), false);
+        var editor = Field<TextBox>(form, "_agentPrompt");
+        Check(editor.Multiline && editor.AcceptsReturn && editor.AcceptsTab, "Agent prompt editor must support multiline instructions");
+        Check(editor.Text == production.AgentPrompt, "Saved prompt not restored in editor");
+        var original = form.CaptureSettings();
+        var custom = "Coding instructions: \"quotes\", <svg>, and Unicode café.\r\n\r\nPreserve this exact text.";
+        editor.Text = custom;
+        var changed = form.CaptureSettings();
+        Check(changed.AgentPrompt == custom, "Editor prompt lost during settings capture");
+        var path = Path.Combine(Output, "agent-prompt-custom.json");
+        changed.SaveToFile(path);
+        var restored = EngineConfig.LoadFromFile(path);
+        Check(restored.AgentPrompt == custom && changed.EquivalentTo(restored), "Prompt persistence mismatch");
+        Check(!original.EquivalentTo(changed), "Prompt omitted from persistence verification");
+        Check(original.EquivalentTo(changed, includeAgentPrompt: false), "Prompt-only edit requires a model restart");
+        var payload = Node(ApiClient.BuildChatRequest(restored, "Make an SVG.", 32, true, false, 12345, true));
+        Check(payload["agent_prompt"]!.GetValue<string>() == custom, "Custom prompt missing from outgoing request");
+        Check(payload["messages"]![0]!["content"]!.GetValue<string>() == ApiClient.StandaloneChatInstruction, "Quick Chat capability instructions missing or duplicated");
+        Check(payload["tools"] is null, "Prompt setting unexpectedly advertises tools");
+        editor.Text = "";
+        var empty = form.CaptureSettings();
+        empty.SaveToFile(path);
+        Check(EngineConfig.LoadFromFile(path).AgentPrompt == "", "Empty prompt was replaced with default");
+        var legacy = Node(production).AsObject(); legacy.Remove("agent_prompt");
+        File.WriteAllText(path, legacy.ToJsonString());
+        Check(EngineConfig.LoadFromFile(path).AgentPrompt == AgentPromptDefaults.CodingAndSvg, "Legacy config missing default prompt");
+        var defaults = production.Clone(); defaults.AgentPrompt = AgentPromptDefaults.CodingAndSvg;
+        Write("agent-prompt-default", defaults);
+        Write("agent-prompt-results", new { status = "PASS", multiline_editor = true, exact_persistence = true, legacy_default = true, blank_preserved = true, request_override = true, prompt_only_edit_no_reload = true });
+        Console.WriteLine("PASS: agent prompt editor, persistence, defaults, blank opt-out, request payload, and no-reload comparison.");
+    }
+
+    private static void TestQualityPresets(EngineConfig production)
+    {
+        using var form = new MainForm(Array.Empty<string>(), production.Clone(), false);
+        Check(form.CaptureSettings().EquivalentTo(production), "Opening Studio changed current settings");
+        foreach (var preset in new[] { "Thinking - Medium", "Thinking - Xhigh", "Non-thinking" })
+        {
+            form.ApplyQualityPreset(preset);
+            var cfg = Capture(form, "preset-" + preset.Replace(' ', '_'));
+            var thinking = preset != "Non-thinking";
+            Check(cfg.Thinking == thinking && cfg.PreserveThinking == thinking, "Preset thinking settings");
+            Check(cfg.Sampling.Temperature == (thinking ? 1 : .7) && cfg.Sampling.TopP == (thinking ? .95 : .8), "Preset sampling values");
+            Check(cfg.Sampling.TopK == 20 && cfg.Sampling.MinP == 0 && cfg.Sampling.RepeatPenalty == 1 &&
+                  cfg.Sampling.FrequencyPenalty == 0 && cfg.Sampling.PresencePenalty == (thinking ? 0 : 1.5), "Preset penalties/filters");
+            Check(cfg.ReasoningEffort == (preset == "Thinking - Medium" ? "medium" : "xhigh"), "Preferred effort was lost");
+            var unchanged = cfg.Clone(); unchanged.Sampling = production.Clone().Sampling;
+            unchanged.Thinking = production.Thinking; unchanged.PreserveThinking = production.PreserveThinking;
+            unchanged.ReasoningEffort = production.ReasoningEffort;
+            Check(unchanged.EquivalentTo(production), "Preset changed unrelated configuration");
+        }
+        Console.WriteLine("PASS: opt-in presets, exact values, remembered effort, and unrelated settings preserved.");
+    }
+
+    private static void TestSettingsSnapshot(EngineConfig production)
+    {
+        using var form = new MainForm(Array.Empty<string>(), production.Clone(), false);
+        var captured = Capture(form, "settings-current");
+        Check(captured.EquivalentTo(production), "Settings capture changed the current production configuration");
+        var ui = new UiSettings { StartEngineOnLaunch = false, StartWithWindows = true, MinimizeToTray = false };
+        var snapshot = SettingsSnapshot.Capture(captured, ui);
+        var expected = Node(captured).AsObject();
+        var actual = JsonNode.Parse(snapshot.GetRawText())!.AsObject();
+        foreach (var field in expected)
+            Check(JsonNode.DeepEquals(field.Value, actual["engine"]![field.Key]), "Benchmark snapshot omitted or changed engine setting " + field.Key);
+        foreach (var field in Node(ui).AsObject())
+            Check(JsonNode.DeepEquals(field.Value, actual["studio"]![field.Key]), "Benchmark snapshot omitted Studio preference " + field.Key);
+        foreach (var field in new[] { "active_config", "lookup_description", "lookup_start_width", "lookup_maximum_width", "configured_effective_reasoning_effort" })
+            Check(actual[field] is not null, "Benchmark snapshot omitted derived field " + field);
+        var before = snapshot.GetRawText();
+        captured.Context = 16384; captured.Sampling.Seed = 54321; ui.StartWithWindows = false;
+        Check(snapshot.GetRawText() == before, "Benchmark snapshot changed after later settings edits");
+        var report = SettingsSnapshot.Format(snapshot);
+        Check(report.Contains(before), "Benchmark text output omitted the complete snapshot");
+        Write("settings-snapshot", snapshot);
+        Write("settings-snapshot-results", new { status = "PASS", actual_current_settings_roundtrip = true,
+            engine_fields = expected.Select(x => x.Key).ToArray(), studio_fields = Node(ui).AsObject().Select(x => x.Key).ToArray(),
+            immutable_after_capture = true, report_includes_snapshot = true });
+        Console.WriteLine("PASS: every Settings-page engine value and Studio preference, save/reload fidelity, immutable benchmark snapshot, and text export.");
+    }
+
     private static EngineConfig Capture(MainForm form, string state, bool stream = false, string prompt = "Reply with the word ready.")
     {
         var cfg = form.CaptureSettings();
@@ -39,9 +122,14 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--config") { LifecycleTests.FakeEngine(args); return; }
+        if (args.Length == 2 && args[0] == "--lifecycle") { LifecycleTests.Run(Path.GetFullPath(args[1])).GetAwaiter().GetResult(); return; }
         Check(args.Length >= 2, "Usage: StudioConfigTruth production-config output-directory [health-json]");
         Output = Path.GetFullPath(args[1]); Directory.CreateDirectory(Output);
         var production = EngineConfig.LoadFromFile(Path.GetFullPath(args[0]));
+        if (args.Length == 3 && args[2] == "--presets") { TestQualityPresets(production); TestAgentPrompt(production); return; }
+        if (args.Length == 3 && args[2] == "--settings-snapshot") { TestSettingsSnapshot(production); return; }
+        if (args.Length == 3 && args[2] == "--agent-prompt") { TestAgentPrompt(production); return; }
         if (args.Length == 3)
         {
             var health = File.ReadAllText(args[2]);

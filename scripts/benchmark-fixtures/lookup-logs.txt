@@ -1,0 +1,12 @@
+2026-09-27T12:00:00Z level=INFO service=ledger worker=03 request=R0000 action=checkpoint status=complete records=100 elapsed_ms=20
+2026-09-27T12:01:00Z level=INFO service=ledger worker=03 request=R0001 action=checkpoint status=complete records=101 elapsed_ms=21
+2026-09-27T12:02:00Z level=INFO service=ledger worker=03 request=R0002 action=checkpoint status=complete records=102 elapsed_ms=22
+2026-09-27T12:03:00Z level=INFO service=ledger worker=03 request=R0003 action=checkpoint status=complete records=103 elapsed_ms=23
+2026-09-27T12:04:00Z level=INFO service=ledger worker=03 request=R0004 action=checkpoint status=complete records=104 elapsed_ms=24
+2026-09-27T12:05:00Z level=INFO service=ledger worker=03 request=R0005 action=checkpoint status=complete records=105 elapsed_ms=25
+2026-09-27T12:06:00Z level=INFO service=ledger worker=03 request=R0006 action=checkpoint status=complete records=106 elapsed_ms=26
+2026-09-27T12:07:00Z level=INFO service=ledger worker=03 request=R0007 action=checkpoint status=complete records=107 elapsed_ms=27
+2026-09-27T12:08:00Z level=INFO service=ledger worker=03 request=R0008 action=checkpoint status=complete records=108 elapsed_ms=28
+2026-09-27T12:09:00Z level=INFO service=ledger worker=03 request=R0009 action=checkpoint status=complete records=109 elapsed_ms=29
+2026-09-27T12:10:00Z level=INFO service=ledger worker=03 request=R0010 action=checkpoint status=complete records=110 elapsed_ms=30
+2026-09-27T12:11:00Z level=INFO service=ledger worker=03 request=R0011 action=checkpoint status=complete records=111 elapsed_ms=31

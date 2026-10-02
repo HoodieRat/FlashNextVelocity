@@ -2,6 +2,14 @@
 
 A Windows desktop/tray application and native `gfx1151` inference server for Qwen3.8-Flash-Next on AMD Strix Halo.
 
+## Current Windows defaults and measured results
+
+Fresh installs and Studio **Restore Default** use the measured 32k context profile: distribution MTP with the shared Q8_0 sidecar and Latin vocabulary, draft limit 7, confidence 0.75, prefill batch 4,096, and sticky context lookup. Lookup starts at 6 tokens and can promote to 16 within a request. Sampling is temperature 0.35, top-p 0.9, top-k 20, min-p 0, and repeat penalty 1. Existing settings are preserved across builds.
+
+The [focused lookup comparison](LOOKUP-POLICY-REPORT.md) measured **16.3% faster file editing** and **10.0% faster log quotation** against fixed6, with identical copied outputs and all 18 measured checks passing. Prose throughput was essentially unchanged. These results apply to the published workloads; broad answer quality was not evaluated.
+
+The [API benchmark report](BENCHMARK-REPORT.md) includes throughput, latency, context depth, task checks, and reproducibility artifacts. That run is partial: 43 completed checks passed, but the conversation condition failed. See the [benchmark guide](docs/BENCHMARKING.md) for commands and measurement limits.
+
 This package is a **clean project**, not a hotfix overlay. It does not contain the old numbered repair BAT files.
 
 ## What you get
@@ -50,12 +58,35 @@ Closing the dashboard window minimizes it to the tray. Use the tray menu **Exit*
 
 ## Dashboard
 
-The desktop dashboard has four tabs:
+The desktop dashboard has five tabs:
 
 - **Dashboard**: engine status, MTP/vision state, API URL and a real chat/code test.
 - **Settings**: model, MTP, mmproj, context, MTP draft max, host/port and sampling controls. `Save + Restart Engine` applies engine-level settings.
+- **Agent Prompt**: editable system instructions, prefilled with a coding and SVG design prompt. `Save + Apply` saves it for new Quick Chat, browser chat, and API requests that explicitly supply it without reloading the model. An empty prompt disables these additional instructions; client system instructions and tools are retained.
 - **Benchmark**: warmup plus measured inference, including prefill tok/s, decode tok/s, MTP acceptance and successive ~64-token decode windows.
 - **Logs**: live native stdout/stderr and access to persisted logs.
+
+Benchmark reporting requirement: every Settings-page value must appear in the displayed benchmark report and saved JSON, including disabled settings, model paths, lookup parameters, memory guard, sampling, reasoning preferences, active config path, and Studio startup preferences. Studio captures this snapshot before running; request overrides and their effective values are reported separately. Lookup telemetry must identify `sticky`, `fixed6`, or `fixed16`, its starting/maximum/final widths, capacity, and whether/where promotion happened. Last Request includes the engine configuration captured for that request; local Studio preferences are labeled with their refresh time context.
+
+Quick Chat is a standalone chat: code and SVG requests return code in the response. It has no filesystem or shell tools. Coding clients such as OpenCode supply their own tools and execute the structured calls returned by the server.
+
+The Studio agent prompt is stored as `agent_prompt` in `dist/config.json`. Desktop and browser Studio explicitly send it with their requests. External chat API requests add no Studio prompt when `agent_prompt` is omitted, null, or empty. An explicit string is added once before client messages; other non-null types return HTTP 400. `/health` exposes the live saved prompt as `studio_agent_prompt` for browser Studio. Model and sampling settings still affect output quality.
+
+Studio launches the engine with an immutable configuration snapshot and the internal `--studio-config` argument pointing to the durable editable configuration. Prompt-only Save + Apply changes affect new Studio requests without reloading the model. Start/restart operations are serialized; Stop and Exit cancel initialization, and only the owned engine process is terminated. An occupied port produces a startup error.
+
+The Settings page provides opt-in **Apply Thinking - Medium**, **Apply Thinking - Xhigh**, and **Apply Non-thinking** presets using Qwen's recommended sampling values. These fill controls without saving or restarting and preserve context, MTP, lookup, memory guard, seed, repeat window, paths, and token limits. Use Save + Restart to apply them. Thinking presets preserve supplied reasoning history; external clients must retain and resend `reasoning_content` to benefit from that setting.
+
+Runtime `fnv-mtp-cache-replay-v13` selectively backports Gufo's MTP cache/replay correction: residual validity, cache-only prefill, consistent persistent projections, and corrected snapshot state. Older snapshots are rejected. Grouped HC normalization, asynchronous halo chains, exact target verification, and Windows I/O remain in place.
+
+The measured Windows distribution/Q8/Latin/C1 configuration uses a separate calibrated cost curve. Its model, sidecar layout, serving geometry, and compact verification lane are checked before selection; other configurations retain the incumbent curve. Health and request metrics identify the selected profile. Adaptive depth and the draft maximum of 7 are retained.
+
+The inference update can be staged with `scripts/build-inference-candidate.ps1` and installed with Studio closed using `scripts/install-inference-candidate.ps1`. Installation verifies binary hashes, preserves `config.json`, `ui.json`, and `runtime.json`, and retains the prior binaries under `build/inference-install-backup-*`.
+
+Chat streams send text and reasoning as they are generated. Tool calls are sent only after the entire call has been parsed, with required arguments and declared basic types checked; interrupted calls never expose an empty placeholder to clients. Cancelling a client request releases the generation session. Text responses report `finish_reason: "length"` when the output budget runs out. A tool call cut off by the output budget returns an explicit error; streaming errors use the SSE error envelope.
+
+For a real-model regression check with Studio already running, run `python tests/chat_integration.py`. It checks the pelican SVG prompt, tool-call/result continuation, streaming parity, output limits, reasoning, and disconnect cancellation. Outputs are saved under `benchmarks/chat-integration`.
+
+Run `python tests/tool_stream_regression.py` for the shorter real-model regression covering complete writes, truncated writes, streaming/JSON error parity, and disconnect cancellation. Outputs are saved under `benchmarks/tool-stream-regression`.
 
 There is also a browser dashboard served by the native engine:
 
@@ -167,3 +198,11 @@ The fix is applied to both single-session and batched ROCm MTP execution. The bu
 Benchmark telemetry now reports `MTP hidden normalization: per-HC-stream`.
 
 See `MTP-HC-GROUPNORM-v1.0.9.md` and `VALIDATION-v1.0.9.txt`.
+
+## GitHub benchmark report
+
+Run **`BENCHMARK-REPORT.bat`** for a bounded text benchmark: 16 conditions covering prose, code generation, code editing, acceleration modes, occupied context, JSON/tools, conversation continuation, and longer generation. Stop the normal engine in Studio first; the runner uses three sequential launches with temporary configuration copies.
+
+The default 45-minute limit includes loading and model fingerprinting. Results appear in the terminal and in [BENCHMARK-REPORT.md](BENCHMARK-REPORT.md), with charts, input snapshots, JSON, and CSV in the corresponding `benchmark-reports/` run folder. Commit both the report and its linked run folder to display everything on GitHub.
+
+See [Benchmarking guide](docs/BENCHMARKING.md) for methodology, options, comparison rules, and report recovery. `BENCHMARK-REPORT.bat --plan` previews the report without loading the model.

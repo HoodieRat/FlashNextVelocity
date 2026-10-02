@@ -503,6 +503,7 @@ void Session::Reset() {
   spec_tokens_ = 0;
   ngram_.Reset();
   mtp_.position = 0;
+  mtp_.residual_valid = false;
   mtp_.blocks = 0;
   const Config& c = owner_->config();
   for (auto& l : linear_) {
@@ -1636,7 +1637,11 @@ bool Executor::Wait(const char* what, std::string* error_msg) const {
 }
 
 bool Executor::WaitPle(std::string* error_msg) const {
-  const bool ok = ple_pending_ && ngram_->WaitRead();
+  if (!ple_pending_) {
+    AssignError(error_msg, "n-gram table wait has no pending read");
+    return false;
+  }
+  const bool ok = ngram_->WaitRead();
   ple_pending_ = false;
   if (!ok) {
     AssignError(error_msg, "n-gram table read failed");
@@ -1842,7 +1847,8 @@ bool Executor::Attention(const DeviceLayer& l, Session::AttentionState& s,
   {
     QsaSpan indexer(stream_, 0, s.index_k != nullptr || sparse);
     if (s.index_k != nullptr) {
-      if (!Dense(l.indexer_k, x, s_.ik, n_tokens, error_msg)) {
+      if (!(projections_ready ? DenseBatch(l.indexer_k, x, s_.ik, n_tokens, error_msg)
+                            : Dense(l.indexer_k, x, s_.ik, n_tokens, error_msg))) {
         return false;
       }
       StoreRows(s_.ik, s.index_k, n_tokens, c.indexer_head_dim, pos,
@@ -2376,7 +2382,8 @@ bool Executor::Forward(Session& session, std::span<const std::int32_t> tokens,
                             (static_cast<std::uint64_t>(speculative) << 32) |
                             (static_cast<std::uint64_t>(sparse) << 33) |
                             (static_cast<std::uint64_t>(download_logits) << 34) |
-                            (compact_key << 37);
+                            (compact_key << 37) |
+                            (fnvprof::OnDecode() ? fnvprof::kProfileGraphBit : 0);
   // PLE first consumes the disk rows at its injection layer. Queue the
   // preceding layers before waiting, including on captured graph replay.
   // Both pieces use the same stream and arithmetic as the unsplit graph.
@@ -2400,6 +2407,8 @@ bool Executor::Forward(Session& session, std::span<const std::int32_t> tokens,
   };
   // Only the suffix waits for its pinned n-gram rows. During eager
   // execution and capture, Ple performs this wait at the same boundary.
+  // The lookup must use Run's effective (possibly profiled) key: a graph
+  // from the unprofiled warmup does not mean this suffix will replay.
   if (graph && session.graphs_.contains(key) && ple_pending_ &&
       !WaitPle(error_msg)) {
     return false;
@@ -2430,7 +2439,8 @@ bool Executor::Forward(Session& session, std::span<const std::int32_t> tokens,
     // the trunk residual is still in shared scratch. MtpBody reads that
     // residual into xn before reusing res for the predictor output.
     PrefillPhase draft_phase(false);
-    if (!MtpForward(session, tokens.subspan(1), 0, {}, error_msg, s_.res))
+    if (!MtpForward(session, tokens.subspan(1), 0, {.kv_only = true}, error_msg,
+                    s_.res))
       return false;
   }
   return true;
@@ -2783,7 +2793,7 @@ bool Executor::Rollback(Session& session, std::uint32_t keep,
 }
 
 constexpr std::array<char, 8> kSnapshotMagic{'Q', 'F', 'N', 'S',
-                                             'N', 'A', 'P', '4'};
+                                             'N', 'A', 'P', '5'};
 
 /// Fixed header ahead of the section bytes. It carries every geometry
 /// value the section sizes derive from, so a payload of another artifact
@@ -2804,6 +2814,7 @@ struct SnapshotHeader {
   std::uint32_t blocks;
   std::uint32_t mtp_position;
   std::uint32_t mtp_blocks;
+  std::uint32_t mtp_residual_valid;
   std::uint32_t hidden_rows;
   std::uint32_t image_count;
   std::array<std::int32_t, Config::kMaxPleNgram - 1> ngram_prev;
@@ -2941,8 +2952,10 @@ std::uint64_t Executor::WalkSnapshot(const SnapshotHeader& h,
                 "draft K cache") ||
         !region(mtp != nullptr ? mtp->v_cache : nullptr, mtp_kv_bytes,
                 "draft V cache") ||
-        !region(mtp != nullptr ? mtp->h : nullptr,
-                std::uint64_t{h.hc_dim} * sizeof(float), "draft residual") ||
+        !region(
+            mtp != nullptr ? mtp->h : nullptr,
+            h.mtp_residual_valid ? std::uint64_t{h.hc_dim} * sizeof(float) : 0,
+            "draft residual") ||
         !region(mtp != nullptr ? mtp->target_hidden : nullptr,
                 std::uint64_t{h.hidden_rows} * h.hc_dim * sizeof(float),
                 "kept trunk rows")) {
@@ -2960,6 +2973,7 @@ std::uint64_t Executor::SnapshotBytes(const Session& session,
   h.blocks = session.blocks_;
   h.mtp_blocks = session.mtp_.blocks;
   h.mtp_position = session.mtp_.position;
+  h.mtp_residual_valid = session.mtp_.residual_valid;
   h.hidden_rows = hidden_rows;
   return WalkSnapshot(
       h, nullptr,
@@ -2988,6 +3002,7 @@ bool Executor::SaveSnapshot(const Session& session, std::uint32_t hidden_rows,
   h.blocks = session.blocks_;
   h.mtp_blocks = session.mtp_.blocks;
   h.mtp_position = session.mtp_.position;
+  h.mtp_residual_valid = session.mtp_.residual_valid;
   h.hidden_rows = hidden_rows;
   h.ngram_prev = session.ngram_.prev;
   h.payload_bytes = SnapshotBytes(session, hidden_rows);
@@ -3042,7 +3057,10 @@ bool Executor::RestoreSnapshot(Session& session,
       h.mtp_position - h.mtp_blocks * h.compress_ratio >
           session.index_capacity_ ||
       h.hidden_rows > h.position || h.hidden_rows > options_.max_speculative ||
-      (h.has_mtp == 0 && (h.mtp_position != 0 || h.hidden_rows != 0))) {
+      h.mtp_residual_valid > 1 ||
+      (h.mtp_residual_valid != 0 && h.mtp_position == 0) ||
+      (h.has_mtp == 0 && (h.mtp_position != 0 || h.hidden_rows != 0 ||
+                          h.mtp_residual_valid != 0))) {
     AssignError(error_msg, "snapshot positions do not fit this session");
     return false;
   }
@@ -3105,6 +3123,7 @@ bool Executor::RestoreSnapshot(Session& session,
   session.blocks_ = h.blocks;
   session.mtp_.position = h.mtp_position;
   session.mtp_.blocks = h.mtp_blocks;
+  session.mtp_.residual_valid = h.mtp_residual_valid != 0;
   session.spec_base_ = h.position;
   session.spec_tokens_ = 0;
   session.ngram_.prev = h.ngram_prev;
@@ -3146,7 +3165,7 @@ bool Executor::MtpForwardQueued(
     std::int32_t hidden_row, bool token, bool candidates,
     std::string* error_msg, const float* hidden_source, MtpTrace* trace,
     const std::int32_t* device_token, std::int32_t chain_slot,
-    bool synchronize) const {
+    bool synchronize, bool kv_only) const {
   const bool device_input = device_token != nullptr;
   const auto n = device_input ? 1U : static_cast<std::uint32_t>(tokens.size());
   if (session.owner_ != this ||
@@ -3179,12 +3198,18 @@ bool Executor::MtpForwardQueued(
     AssignError(error_msg, "device-fed MTP chain does not transfer candidates");
     return false;
   }
+  if ((hidden_row < 0 && !session.mtp_.residual_valid) ||
+      (kv_only && (hidden_row < 0 || token || candidates || trace))) {
+    AssignError(error_msg, "MTP residual requires a full known-hidden forward");
+    return false;
+  }
   const std::uint32_t pos = session.mtp_.position;
   if (pos + n > session.max_context_) {
     AssignError(error_msg, "MTP context is full");
     return false;
   }
   ++session.mutation_epoch_;
+  session.mtp_.residual_valid = false;
   if (!device_input) std::copy(tokens.begin(), tokens.end(), tokens_host_);
 
   Session::Control* control_source = control_host_;
@@ -3219,7 +3244,7 @@ bool Executor::MtpForwardQueued(
       (std::uint64_t{token} << 41) |
       (std::uint64_t{candidates} << 43) |
       (std::uint64_t{sparse} << 44) |
-      (std::uint64_t{device_input} << 45) | (slot_key << 48);
+      (std::uint64_t{device_input} << 45) | (std::uint64_t{kv_only} << 46) | (slot_key << 48);
   std::int32_t* token_device =
       token && chain_slot >= 0 ? s_.mtp_chain_tokens + chain_slot : nullptr;
   std::int32_t* token_host =
@@ -3227,13 +3252,14 @@ bool Executor::MtpForwardQueued(
   const auto body = [&] {
     return MtpBody(session, n, pos, token, candidates, error_msg,
                    graph ? graph_pool : pool, hidden_source, trace,
-                   device_token, control_source, token_device, token_host);
+                   device_token, control_source, token_device, token_host, kv_only);
   };
   const bool flag_wait = synchronize && graph && done_flag_ != nullptr;
   if (!Run(session, key, graph, body, error_msg,
            synchronize && !flag_wait) ||
       (flag_wait && !Wait("MTP forward", error_msg))) return false;
   session.mtp_.position = pos + n;
+  session.mtp_.residual_valid = !kv_only;
   if (sparse) session.mtp_.blocks = complete;
   return true;
 }
@@ -3245,7 +3271,7 @@ bool Executor::MtpForward(Session& session,
                           const float* hidden_source) const {
   if (!MtpForwardQueued(session, tokens, hidden_row, output.token != nullptr,
                         output.candidates != nullptr, error_msg, hidden_source,
-                        output.trace, nullptr, -1, true)) {
+                        output.trace, nullptr, -1, true, output.kv_only)) {
     return false;
   }
   if (output.token != nullptr) *output.token = *mtp_token_host_;
@@ -3297,7 +3323,7 @@ bool Executor::MtpBody(Session& session, std::uint32_t n, std::uint32_t pos,
                        MtpTrace* trace, const std::int32_t* device_token,
                        const Session::Control* control_source,
                        std::int32_t* token_device,
-                       std::int32_t* token_host) const {
+                       std::int32_t* token_host, bool kv_only) const {
   const Config& c = config();
   const DeviceLayer& l = model_->mtp();
   const std::uint32_t hc_dim = c.HcDim();
@@ -3345,8 +3371,8 @@ bool Executor::MtpBody(Session& session, std::uint32_t n, std::uint32_t pos,
               c.rms_eps, stream_);
   if (trace && !copy_trace(s_.mtp_h + final_row, trace->normalized_hidden))
     return false;
-  if (!Dense(l.nextn_fc_embedding, s_.mtp_embd, s_.mtp_eproj, n, error_msg) ||
-      !Dense(l.nextn_fc_hidden, s_.mtp_h, s_.mtp_res, n * c.hc_count,
+  if (!DenseBatch(l.nextn_fc_embedding, s_.mtp_embd, s_.mtp_eproj, n, error_msg) ||
+      !DenseBatch(l.nextn_fc_hidden, s_.mtp_h, s_.mtp_res, n * c.hc_count,
              error_msg)) {
     return false;
   }
@@ -3369,12 +3395,63 @@ bool Executor::MtpBody(Session& session, std::uint32_t n, std::uint32_t pos,
   // Keep the final 128-column tile (and its predecessor for short tails).
   // At least 96 rows retain the wide mixer/projection arithmetic. Attention
   // still writes every KV/indexer row before the scratch view is narrowed.
-  const auto skipped = last_only && n >= 224 ? (n - 96) / 128 * 128 : 0U;
-  if (!HcMix(l.hc_attn, s_.mtp_res, false, s_.mixed, s_.inject, n, error_msg) ||
-      !Attention(l, attn, s_.mixed, s_.block_out, n,
+  // Short catch-up also carries only its final row. Keep two rows so the
+  // router and projections retain their multi-row arithmetic; the single
+  // row route has a different floating-point reduction.
+  const auto skipped =
+      control->hidden_row >= 0 && n > 2 && n <= kVecBatch
+          ? n - 2
+          : (last_only && n >= 224 ? (n - 96) / 128 * 128 : 0U);
+  const bool cache_only = kv_only && !l.attn_qkv.empty();
+  if (!HcMixBatch(l.hc_attn, s_.mtp_res, false, s_.mixed,
+                  cache_only ? nullptr : s_.inject, n, error_msg)) {
+    return false;
+  }
+  if (cache_only) {
+    // Known trunk rows replace the predictor residual on the next forward.
+    // Only K/V and pooled indexer keys survive this catch-up. Slice the
+    // packed Q/gate/K/V weight without copying or changing its arithmetic.
+    auto kv = l.attn_qkv;
+    const TensorRef layout{.type = kv.type, .cols = kv.cols};
+    kv.data = static_cast<std::uint8_t*>(kv.data) +
+              std::size_t{2} * c.AttentionQDim() * layout.RowBytes();
+    kv.rows = 2 * c.AttentionKvDim();
+    if (!DenseBatch(kv, s_.mixed, s_.qg, n, error_msg) ||
+        !PrepareAttention(s_.qg, kv.rows, nullptr, l.attn_k_norm.f32(), nullptr,
+                          nullptr, attn.k_cache, attn.v_cache, n, 0,
+                          c.num_kv_heads, c.head_dim, c.rotary_dim,
+                          &session.control_->mtp_position, c.rope_theta,
+                          c.rms_eps, stream_, attn.rope)) {
+      AssignError(error_msg, "MTP cache projection failed");
+      return false;
+    }
+    const auto capacity =
+        IndexerCapacity(c, options_.max_batch, session.max_context_);
+    if (!DenseBatch(l.indexer_k, s_.mixed, s_.ik, n, error_msg))
+      return false;
+    StoreRows(s_.ik, attn.index_k, n, c.indexer_head_dim,
+              &session.control_->mtp_position, capacity, stream_);
+    if (pos + n > c.indexer_top_k) {
+      PoolIndexerBlocks(attn.index_k, l.indexer_k_norm.f32(), attn.block_k,
+                        &session.control_->mtp_blocks,
+                        &session.control_->mtp_position, n, pool_grid,
+                        c.compress_ratio, c.indexer_head_dim, c.rotary_dim,
+                        c.rope_theta, c.rms_eps, capacity, stream_, attn.rope);
+    }
+    return true;
+  }
+  if (!l.attn_qkv.empty()) {
+    if (!DenseBatch(l.attn_qkv, s_.mixed, s_.qg, n, error_msg))
+      return false;
+  } else if (!DenseBatch(l.attn_q, s_.mixed, s_.qg, n, error_msg) ||
+             !DenseBatch(l.attn_k, s_.mixed, s_.k, n, error_msg) ||
+             !DenseBatch(l.attn_v, s_.mixed, s_.v, n, error_msg)) {
+    return false;
+  }
+  if (!Attention(l, attn, s_.mixed, s_.block_out, n,
                  &session.control_->mtp_position, &session.control_->mtp_blocks,
                  pos, pool_grid, session.max_context_,
-                 pos + n > c.indexer_top_k, error_msg, last_only, false,
+                 pos + n > c.indexer_top_k, error_msg, last_only, true,
                  skipped == 0)) {
     return false;
   }
@@ -3408,8 +3485,19 @@ bool Executor::MtpBody(Session& session, std::uint32_t n, std::uint32_t pos,
              error_msg) ||
       (trace && !copy_trace(s_.mixed + static_cast<std::size_t>(tail_rows - 1) *
                                            c.hidden_size,
-                            trace->ffn_input)) ||
-      !Moe(l, s_.mixed, s_.block_out, tail_rows, error_msg, last_only)) {
+                            trace->ffn_input))) {
+    return false;
+  }
+  if (skipped != 0 && tail_rows == 2 &&
+      !Check(hipMemcpyAsync(s_.mixed, s_.mixed + c.hidden_size,
+                            c.hidden_size * sizeof(float),
+                            hipMemcpyDeviceToDevice, stream_),
+             "MTP tail padding", error_msg)) {
+    return false;
+  }
+  // The discarded padding row shares the final row's routed experts, so
+  // preserving multi-row arithmetic does not reread another expert set.
+  if (!Moe(l, s_.mixed, s_.block_out, tail_rows, error_msg, last_only)) {
     return false;
   }
   Combine(s_.mtp_res, nullptr, tail_rows);

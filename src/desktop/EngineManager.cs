@@ -6,151 +6,227 @@ namespace FlashNextVelocity.Desktop;
 
 internal sealed class EngineManager : IDisposable
 {
-    private const string RequiredRuntimeRevision = "fnv-async-halo-pipeline-v12";
-    private Process? _process;
-    private StreamWriter? _logWriter;
-    private EngineConfig? _appliedConfig;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
+    internal const string RequiredRuntimeRevision = "fnv-mtp-cache-replay-v13";
+    internal enum LifecycleState { Stopped, Starting, Running, Stopping, Failed }
+    private sealed class Launch(Process process, StreamWriter log, string configPath)
+    {
+        public readonly Process Process = process;
+        public readonly StreamWriter Log = log;
+        public readonly string ConfigPath = configPath;
+        public bool Started;
+        public bool IntentionalStop;
+        public EngineConfig? AppliedConfig;
+    }
+    private Launch? _launch;
+    private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly object _gate = new();
-
+    private CancellationTokenSource? _startup;
+    private int _stopRequests;
+    private bool _disposed;
+    private readonly string _engineExe, _studioConfig, _logDirectory;
+    private readonly TimeSpan _startupTimeout;
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
     public event Action<string>? LogLine;
     public event Action? StateChanged;
-    public bool IsRunning => _process is { HasExited: false };
-    public int? ProcessId => IsRunning ? _process!.Id : null;
+    public LifecycleState State { get; private set; } = LifecycleState.Stopped;
+    public long Generation { get; private set; }
+    public bool IsBusy => _transition.CurrentCount == 0;
+    public bool IsRunning { get { lock (_gate) return _launch is { Started: true } l && !l.Process.HasExited; } }
+    public int? ProcessId { get { lock (_gate) return _launch is { Started: true } l && !l.Process.HasExited ? l.Process.Id : null; } }
+    public EngineConfig? AppliedConfig { get { lock (_gate) return _launch?.AppliedConfig?.Clone(); } }
+
+    internal EngineManager(string? engineExe = null, string? studioConfig = null,
+                           string? logDirectory = null, TimeSpan? startupTimeout = null)
+    {
+        _engineExe = engineExe ?? AppPaths.EngineExe;
+        _studioConfig = studioConfig ?? AppPaths.Config;
+        _logDirectory = logDirectory ?? AppPaths.Logs;
+        _startupTimeout = startupTimeout ?? TimeSpan.FromMinutes(3);
+    }
 
     public bool RequiresRestart(EngineConfig cfg) =>
-        !IsRunning || _appliedConfig is null || !_appliedConfig.EquivalentTo(cfg);
+        State != LifecycleState.Running || AppliedConfig is not { } applied || !applied.EquivalentTo(cfg, includeAgentPrompt: false);
 
-    public async Task StartAsync(EngineConfig cfg)
+    public Task StartAsync(EngineConfig cfg) => TransitionAsync(cfg.Clone(), false);
+    public Task RestartAsync(EngineConfig cfg) => TransitionAsync(cfg.Clone(), true);
+
+    private async Task TransitionAsync(EngineConfig snapshot, bool restart)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!await _transition.WaitAsync(0).ConfigureAwait(false))
+            throw new InvalidOperationException("An engine transition is already in progress.");
+        CancellationTokenSource startup;
+        lock (_gate)
+        {
+            startup = new CancellationTokenSource();
+            _startup = startup;
+            if (_stopRequests != 0) startup.Cancel();
+        }
+        try
+        {
+            startup.Token.ThrowIfCancellationRequested();
+            if (restart) await StopCoreAsync().ConfigureAwait(false);
+            startup.Token.ThrowIfCancellationRequested();
+            await StartCoreAsync(snapshot, startup.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (startup.IsCancellationRequested)
+        {
+            await StopCoreAsync().ConfigureAwait(false);
+            throw;
+        }
+        catch
+        {
+            await StopCoreAsync().ConfigureAwait(false);
+            SetState(LifecycleState.Failed);
+            throw;
+        }
+        finally
+        {
+            lock (_gate) { if (ReferenceEquals(_startup, startup)) _startup = null; }
+            startup.Dispose();
+            _transition.Release();
+            StateChanged?.Invoke();
+        }
+    }
+
+    private async Task StartCoreAsync(EngineConfig cfg, CancellationToken cancellation)
     {
         if (IsRunning) return;
-        if (!File.Exists(AppPaths.EngineExe)) throw new FileNotFoundException("Native engine is not built.", AppPaths.EngineExe);
+        await StopCoreAsync().ConfigureAwait(false);
+        if (!File.Exists(_engineExe)) throw new FileNotFoundException("Native engine is not built.", _engineExe);
         if (string.IsNullOrWhiteSpace(cfg.Model) || !File.Exists(cfg.Model)) throw new InvalidOperationException("Configure a valid first model shard before starting the engine.");
-        Directory.CreateDirectory(AppPaths.Logs);
-        Emit($"Desktop executable: {Environment.ProcessPath ?? AppContext.BaseDirectory}");
-        Emit($"Launching engine: {AppPaths.EngineExe}");
-        Emit($"Live config: {AppPaths.Config}");
-
-        foreach (var p in Process.GetProcessesByName("FlashNextVelocity.Engine"))
+        SetState(LifecycleState.Starting);
+        // Do not attach to a different engine which happens to answer health.
+        var endpoint = new Uri(cfg.BaseUrl);
+        try
         {
-            try { p.Kill(true); p.WaitForExit(3000); } catch { }
+            using var socket = new System.Net.Sockets.TcpClient();
+            await socket.ConnectAsync(endpoint.Host, endpoint.Port, cancellation).ConfigureAwait(false);
+            throw new InvalidOperationException($"Port {cfg.Port} is already in use. Stop the existing server or choose another port.");
         }
-
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var logPath = Path.Combine(AppPaths.Logs, $"engine-{stamp}.log");
-        _logWriter?.Dispose();
-        _logWriter = new StreamWriter(new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false)) { AutoFlush = true };
-
+        catch (System.Net.Sockets.SocketException) { }
+        cancellation.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(_logDirectory);
+        var snapshotPath = Path.Combine(Path.GetDirectoryName(_studioConfig)!, $"config.launch-{Guid.NewGuid():N}.json");
+        cfg.SaveToFile(snapshotPath);
+        var logPath = Path.Combine(_logDirectory, $"engine-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
         var psi = new ProcessStartInfo
         {
-            FileName = AppPaths.EngineExe,
-            Arguments = $"--config \"{AppPaths.Config}\"",
-            WorkingDirectory = AppPaths.AppDir,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
+            FileName = _engineExe,
+            WorkingDirectory = Path.GetDirectoryName(_engineExe)!,
+            UseShellExecute = false, RedirectStandardOutput = true,
+            RedirectStandardError = true, CreateNoWindow = true
         };
+        psi.ArgumentList.Add("--config"); psi.ArgumentList.Add(snapshotPath);
+        psi.ArgumentList.Add("--studio-config"); psi.ArgumentList.Add(_studioConfig);
         ApplyRuntimeEnvironment(psi);
-
-        var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        proc.OutputDataReceived += (_, e) => { if (e.Data != null) Emit(e.Data); };
-        proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Emit(e.Data); };
+        var launch = new Launch(new Process { StartInfo = psi, EnableRaisingEvents = true },
+            new StreamWriter(new FileStream(logPath, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false)) { AutoFlush = true }, snapshotPath);
+        lock (_gate) { _launch = launch; ++Generation; }
+        var proc = launch.Process;
+        proc.OutputDataReceived += (_, e) => { if (e.Data != null) Emit(e.Data, launch); };
+        proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Emit(e.Data, launch); };
         proc.Exited += (_, _) =>
         {
-            try
+            try { Emit(launch.IntentionalStop ? "Engine stopped." : $"Engine exited with code {proc.ExitCode} ({FormatExitCode(proc.ExitCode)}).{ExplainExitCode(proc.ExitCode)}", launch); }
+            catch (Exception e) { Emit("Engine exit diagnostic failed: " + e.Message, launch); }
+            lock (_gate)
             {
-                proc.WaitForExit();
-                Emit($"Engine exited with code {proc.ExitCode} ({FormatExitCode(proc.ExitCode)}).{ExplainExitCode(proc.ExitCode)}");
-            }
-            catch (Exception e) { Emit("Engine exit diagnostic failed: " + e.Message); }
-            if (ReferenceEquals(_process, proc))
-            {
-                _process = null;
-                _appliedConfig = null;
+                if (ReferenceEquals(_launch, launch))
+                {
+                    launch.AppliedConfig = null;
+                    if (!launch.IntentionalStop) State = LifecycleState.Failed;
+                }
             }
             StateChanged?.Invoke();
         };
+        Emit($"Launching engine: {_engineExe}; immutable config: {snapshotPath}; Studio config: {_studioConfig}", launch);
         if (!proc.Start()) throw new InvalidOperationException("Failed to start the native engine process.");
-        proc.BeginOutputReadLine();
-        proc.BeginErrorReadLine();
-        _process = proc;
-        _appliedConfig = null;
-        StateChanged?.Invoke();
-
-        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(3);
+        lock (_gate) launch.Started = true;
+        proc.BeginOutputReadLine(); proc.BeginErrorReadLine();
+        var deadline = DateTime.UtcNow + _startupTimeout;
         Exception? last = null;
         while (DateTime.UtcNow < deadline)
         {
+            cancellation.ThrowIfCancellationRequested();
             if (proc.HasExited)
-            {
-                proc.WaitForExit();
                 throw new InvalidOperationException($"Native engine exited during startup with code {proc.ExitCode} ({FormatExitCode(proc.ExitCode)}).{ExplainExitCode(proc.ExitCode)} Check the Logs tab.");
-            }
-
-            string? fatalMismatch = null;
+            string? mismatch = null;
             try
             {
-                using var r = await _http.GetAsync(cfg.BaseUrl + "/health");
-                if (r.IsSuccessStatusCode)
+                using var response = await _http.GetAsync(cfg.BaseUrl + "/health", cancellation).ConfigureAwait(false);
+                if (response.IsSuccessStatusCode)
                 {
-                    var text = await r.Content.ReadAsStringAsync();
-                    fatalMismatch = FindConfigMismatch(text, cfg);
-                    if (fatalMismatch is null)
+                    var healthJson = await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false);
+                    using var health = JsonDocument.Parse(healthJson);
+                    mismatch = health.RootElement.TryGetProperty("server_pid", out var pid) && pid.TryGetInt32(out var serverPid) && serverPid == proc.Id
+                        ? FindConfigMismatch(healthJson, cfg)
+                        : "Health response came from a different process.";
+                    if (mismatch is null)
                     {
-                        _appliedConfig = cfg.Clone();
-                        Emit($"Engine health check passed; active config verified (draft_max={cfg.DraftMax}, proposal={cfg.MtpProposalMode}, prefill_batch={cfg.PrefillBatch}, context={cfg.Context}).");
+                        cancellation.ThrowIfCancellationRequested();
+                        lock (_gate)
+                        {
+                            cancellation.ThrowIfCancellationRequested();
+                            if (!ReferenceEquals(_launch, launch) || proc.HasExited)
+                                throw new InvalidOperationException("Native engine exited before startup health could be applied. Check the Logs tab.");
+                            launch.AppliedConfig = cfg.Clone();
+                            State = LifecycleState.Running;
+                        }
                         StateChanged?.Invoke();
+                        Emit($"Engine health passed; config verified (draft_max={cfg.DraftMax}, proposal={cfg.MtpProposalMode}, prefill_batch={cfg.PrefillBatch}, context={cfg.Context}).", launch);
                         return;
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
             catch (Exception e) { last = e; }
-
-            if (fatalMismatch is not null)
-            {
-                try { if (!proc.HasExited) proc.Kill(true); } catch { }
-                _process = null;
-                _appliedConfig = null;
-                StateChanged?.Invoke();
-                throw new InvalidOperationException("Engine started with settings that do not match the saved config: " + fatalMismatch);
-            }
-
-            await Task.Delay(1000);
+            if (mismatch is not null) throw new InvalidOperationException("Engine settings do not match the launch snapshot: " + mismatch);
+            await Task.Delay(250, cancellation).ConfigureAwait(false);
         }
-        throw new TimeoutException("Engine did not become healthy within three minutes." + (last == null ? "" : " " + last.Message));
+        throw new TimeoutException("Engine did not become healthy within " + _startupTimeout.TotalSeconds + " seconds." + (last == null ? "" : " " + last.Message));
     }
 
     public async Task StopAsync()
     {
-        var p = _process;
-        if (p == null)
-        {
-            _appliedConfig = null;
-            return;
-        }
-        try
-        {
-            if (!p.HasExited)
-            {
-                p.Kill(true);
-                await p.WaitForExitAsync();
-            }
-        }
-        catch { }
+        lock (_gate) { ++_stopRequests; _startup?.Cancel(); }
+        await _transition.WaitAsync().ConfigureAwait(false);
+        try { await StopCoreAsync().ConfigureAwait(false); }
         finally
         {
-            _process = null;
-            _appliedConfig = null;
+            lock (_gate) --_stopRequests;
+            _transition.Release();
             StateChanged?.Invoke();
         }
     }
 
-    public async Task RestartAsync(EngineConfig cfg)
+    private async Task StopCoreAsync()
     {
-        await StopAsync();
-        await Task.Delay(250);
-        await StartAsync(cfg);
+        Launch? launch;
+        lock (_gate) { launch = _launch; if (launch != null) launch.IntentionalStop = true; }
+        if (launch is null) { SetState(LifecycleState.Stopped); return; }
+        SetState(LifecycleState.Stopping);
+        if (launch.Started)
+        {
+            if (!launch.Process.HasExited) launch.Process.Kill(true);
+            await launch.Process.WaitForExitAsync().ConfigureAwait(false);
+            // Drain asynchronous stdout before closing the launch's log.
+            launch.Process.WaitForExit();
+        }
+        lock (_gate)
+        {
+            if (ReferenceEquals(_launch, launch)) _launch = null;
+            launch.Log.Dispose();
+        }
+        launch.Process.Dispose();
+        try { File.Delete(launch.ConfigPath); } catch (IOException) { }
+        SetState(LifecycleState.Stopped);
+    }
+
+    private void SetState(LifecycleState state)
+    {
+        lock (_gate) State = state;
+        StateChanged?.Invoke();
     }
 
     internal static string? FindConfigMismatch(string json, EngineConfig expected)
@@ -199,6 +275,7 @@ internal sealed class EngineManager : IDisposable
         Check(Int(root, "context_lookup_max_ngram") == expected.ContextLookupMaxNgram, "context_lookup_max_ngram", expected.ContextLookupMaxNgram, Int(root, "context_lookup_max_ngram"));
         Check(Int(root, "context_lookup_window") == expected.ContextLookupWindow, "context_lookup_window", expected.ContextLookupWindow, Int(root, "context_lookup_window"));
         Check(Int(root, "context_lookup_min_draft") == expected.ContextLookupMinDraft, "context_lookup_min_draft", expected.ContextLookupMinDraft, Int(root, "context_lookup_min_draft"));
+        Check(Int(root, "context_lookup_max_draft") == expected.ContextLookupMaxDraft, "context_lookup_max_draft", expected.ContextLookupMaxDraft, Int(root, "context_lookup_max_draft"));
         Check(Bool(root, "memory_guard") == expected.MemoryGuard, "memory_guard", expected.MemoryGuard, Bool(root, "memory_guard"));
         Check(Near(Num(root, "memory_guard_min_available_gib"), expected.MemoryGuardMinAvailableGiB), "memory_guard_min_available_gib", expected.MemoryGuardMinAvailableGiB, Num(root, "memory_guard_min_available_gib"));
         Check(Int(root, "sessions") == expected.Sessions, "sessions", expected.Sessions, Int(root, "sessions"));
@@ -221,6 +298,7 @@ internal sealed class EngineManager : IDisposable
             Check(Near(Num(sampling, "frequency_penalty"), expected.Sampling.FrequencyPenalty), "sampling.frequency_penalty", expected.Sampling.FrequencyPenalty, Num(sampling, "frequency_penalty"));
             Check(Near(Num(sampling, "presence_penalty"), expected.Sampling.PresencePenalty), "sampling.presence_penalty", expected.Sampling.PresencePenalty, Num(sampling, "presence_penalty"));
             Check(Int(sampling, "repeat_last_n") == expected.Sampling.RepeatLastN, "sampling.repeat_last_n", expected.Sampling.RepeatLastN, Int(sampling, "repeat_last_n"));
+            Check(Int(sampling, "seed") == expected.Sampling.Seed, "sampling.seed", expected.Sampling.Seed, Int(sampling, "seed"));
         }
 
         return problems.Count == 0 ? null : string.Join("; ", problems);
@@ -252,16 +330,23 @@ internal sealed class EngineManager : IDisposable
         psi.Environment["PATH"] = string.Join(";", parts) + ";" + (psi.Environment.TryGetValue("PATH", out var old) ? old : Environment.GetEnvironmentVariable("PATH"));
     }
 
-    private void Emit(string line)
+    private void Emit(string line, Launch? launch = null)
     {
-        lock (_gate) { _logWriter?.WriteLine($"[{DateTime.Now:HH:mm:ss}] {line}"); }
+        lock (_gate)
+        {
+            // Late callbacks belong to their own log, never the new process.
+            try { (launch ?? _launch)?.Log.WriteLine($"[{DateTime.Now:HH:mm:ss}] {line}"); }
+            catch (ObjectDisposedException) { }
+        }
         LogLine?.Invoke(line);
     }
 
     public void Dispose()
     {
-        try { StopAsync().GetAwaiter().GetResult(); } catch { }
-        _logWriter?.Dispose();
+        if (_disposed) return;
+        if (IsBusy || IsRunning) throw new InvalidOperationException("Await StopAsync before disposing the engine manager.");
+        _disposed = true;
         _http.Dispose();
+        _transition.Dispose();
     }
 }

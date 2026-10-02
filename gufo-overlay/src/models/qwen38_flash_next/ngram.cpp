@@ -12,6 +12,10 @@
 #include <cstring>
 #include <unordered_map>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "src/core/quant/ggml_dequant.hpp"
 
 namespace gufo::models::qwen38_flash_next {
@@ -77,6 +81,9 @@ NgramTable::~NgramTable() {
   if (fd_ >= 0) {
     ::close(fd_);
   }
+  if (buffered_fd_ >= 0) {
+    ::close(buffered_fd_);
+  }
 }
 
 std::unique_ptr<NgramTable> NgramTable::Open(
@@ -115,7 +122,15 @@ std::unique_ptr<NgramTable> NgramTable::Open(
 #else
   t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECT);
   t->direct_ = t->fd_ >= 0;
-  if (t->fd_ < 0) t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (t->direct_) {
+    t->buffered_fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (t->buffered_fd_ < 0) {
+      if (error_msg != nullptr) *error_msg = "cannot open buffered n-gram fallback";
+      return nullptr;
+    }
+  } else {
+    t->fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  }
 #endif
   if (t->fd_ < 0) {
     if (error_msg != nullptr) {
@@ -211,14 +226,55 @@ bool NgramTable::ReadOne(std::uint32_t row, float* dst,
       if (on) fnvprof::AddDiskRead(fnvprof::NowMs() - t0);
     }
   } disk_timer;
+  const std::uint8_t* row_data = base + (offset - begin);
   std::size_t got = 0;
   while (got < needed) {
     const std::int64_t n = ::pread(fd_, base + got, length - got, begin + got);
     if (n <= 0) {
-      if (n < 0 && errno == EINTR) {
+      const int read_errno = n < 0 ? errno : 0;
+#ifdef _WIN32
+      const unsigned long win_error = n < 0 ? GetLastError() : 0;
+#else
+      const unsigned long win_error = 0;
+#endif
+      if (n < 0 && read_errno == EINTR) {
         continue;
       }
-      return false;
+      bool recovered = false;
+      int fallback_errno = 0;
+      unsigned long fallback_win_error = 0;
+      std::size_t fallback_got = 0;
+      if (direct_) {
+        // An in-range row is recovered from the original buffered file view.
+        // Read the complete row again; partial direct data is never consumed.
+        while (fallback_got < row_bytes_) {
+          const auto retry = ::pread(
+              buffered_fd_, base + fallback_got, row_bytes_ - fallback_got,
+              offset + fallback_got);
+          if (retry > 0) {
+            fallback_got += static_cast<std::size_t>(retry);
+            continue;
+          }
+          fallback_errno = retry < 0 ? errno : 0;
+#ifdef _WIN32
+          fallback_win_error = retry < 0 ? GetLastError() : 0;
+#endif
+          if (retry < 0 && fallback_errno == EINTR) continue;
+          break;
+        }
+        recovered = fallback_got == row_bytes_;
+      }
+      std::fprintf(stderr,
+                   "PLE read failure row=%u rows=%llu offset=%llu aligned_begin=%llu requested=%zu aligned_length=%zu required=%zu already_read=%zu direct=%d result=%lld errno=%d win32=%lu buffered_retry=%s buffered_read=%zu buffered_errno=%d buffered_win32=%lu\n",
+                   row, static_cast<unsigned long long>(rows_),
+                   static_cast<unsigned long long>(offset),
+                   static_cast<unsigned long long>(begin), length - got, length,
+                   needed, got, direct_ ? 1 : 0, static_cast<long long>(n),
+                   read_errno, win_error, recovered ? "success" : "failed",
+                   fallback_got, fallback_errno, fallback_win_error);
+      if (!recovered) return false;
+      row_data = base;
+      break;
     }
     got += static_cast<std::size_t>(n);
   }
@@ -226,12 +282,12 @@ bool NgramTable::ReadOne(std::uint32_t row, float* dst,
   // A busy slot is skipped; readers never wait for another row's I/O.
   if (entry != nullptr &&
       !entry->busy.test_and_set(std::memory_order_acquire)) {
-    std::memcpy(cached, base + (offset - begin), row_bytes_);
+    std::memcpy(cached, row_data, row_bytes_);
     entry->row = row;
     entry->valid = true;
     entry->busy.clear(std::memory_order_release);
   }
-  DecodeRow(base + (offset - begin), dst);
+  DecodeRow(row_data, dst);
   return true;
 }
 

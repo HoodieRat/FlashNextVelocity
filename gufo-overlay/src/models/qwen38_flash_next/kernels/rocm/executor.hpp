@@ -102,6 +102,7 @@ private:
     // Common all-accepted cycles never download this row.
     float* frontier_logits{nullptr};
     std::uint32_t position{0};
+    bool residual_valid{false};
   };
 
   mutable bool cancelled_{false};
@@ -241,6 +242,9 @@ public:
     std::int32_t* token{nullptr};
     MtpCandidateLogits* candidates{nullptr};
     MtpTrace* trace{nullptr};  ///< final-row diagnostic; disables graph capture
+    /// Prefill needs only persistent KV. A subsequent full forward with
+    /// known trunk hidden rows is required before heads/recursive proposals.
+    bool kv_only{false};
   };
   struct MtpHeadItem {
     Session* session;
@@ -310,6 +314,8 @@ public:
 
   /// Rewinds the draft block's own context.
   void MtpRewind(Session& session, std::uint32_t position) const noexcept {
+    if (session.mtp_.position != position)
+      session.mtp_.residual_valid = false;
     session.mtp_.position = position;
     session.mtp_.blocks =
         std::min(session.mtp_.blocks, position / config().compress_ratio);
@@ -444,13 +450,13 @@ private:
                const std::int32_t* device_token = nullptr,
                const Session::Control* control_source = nullptr,
                std::int32_t* token_device = nullptr,
-               std::int32_t* token_host = nullptr) const;
+               std::int32_t* token_host = nullptr, bool kv_only = false) const;
   bool MtpForwardQueued(Session& session,
                         std::span<const std::int32_t> tokens,
                         std::int32_t hidden_row, bool token, bool candidates,
                         std::string* error_msg, const float* hidden_source,
                         MtpTrace* trace, const std::int32_t* device_token,
-                        std::int32_t chain_slot, bool synchronize) const;
+                        std::int32_t chain_slot, bool synchronize, bool kv_only = false) const;
   /// Runs `body` eagerly, or as the session's captured graph for `key`
   /// when `graph` is set. A prefix may leave its work queued so the host
   /// can wait for disk reads while the GPU computes it.

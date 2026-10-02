@@ -109,6 +109,11 @@ public:
     return options_.max_context;
   }
   [[nodiscard]] bool HasMtp() const noexcept;
+  [[nodiscard]] bool HasDistributionQ8C1Costs() const noexcept {
+    return distribution_q8_c1_costs_;
+  }
+  [[nodiscard]] std::string_view MtpCostProfileName(
+      const sampling::SamplingConfig& sampling) const noexcept;
   [[nodiscard]] std::uint32_t DecodeConcurrency() const noexcept {
     return options_.decode_concurrency;
   }
@@ -142,6 +147,7 @@ private:
   std::unique_ptr<rocm::Executor> executor_;
   std::shared_ptr<qwen::vision::Encoder> vision_;
   MtpBatchController batch_policy_;
+  bool distribution_q8_c1_costs_{false};
 
   friend class Session;
 };
@@ -260,7 +266,7 @@ public:
   }
 
   /// Compatibility version; bump on payload or inference arithmetic changes.
-  static constexpr std::uint32_t kSnapshotPayloadVersion = 14;
+  static constexpr std::uint32_t kSnapshotPayloadVersion = 17;
   /// Bytes a snapshot of the current context occupies.
   [[nodiscard]] std::uint64_t SnapshotBytes() const;
   /// Captures the whole context (tokens, device caches and recurrent

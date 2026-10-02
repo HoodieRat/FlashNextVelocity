@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "code_edit_check_revision": 2,
+  "system": "You are participating in a reproducible local inference benchmark. Follow the task directly. No filesystem or shell tools are available. Do not describe imaginary tool execution.",
+  "prose": "Explain how asynchronous disk reads, memory bandwidth, and speculative decoding interact in a local language model server. Develop the explanation across several paragraphs with concrete examples. Distinguish time spent doing useful work from time spent waiting. Avoid repetition and do not simply repeat the prompt.",
+  "code_generation": "Write a complete Python function chunked(values, size) that yields consecutive lists containing at most size elements from any iterable. Reject size <= 0 with ValueError. Preserve order and include the final partial chunk. Provide the function first, followed by a brief explanation and three example calls. Do not claim to run code.",
+  "code_edit": "Return the complete updated Python file only, without Markdown fences or explanations. Change total_units so it adds the integer quantity in every row rather than counting rows. Preserve everything else exactly.\n\nVERSION = '1.0'\nDEFAULT_CATEGORY = 'general'\n\ndef total_units(items):\n    return len(items)\n\ndef item_names(items):\n    return [row['name'] for row in items]\n\ndef describe(items):\n    return {'units': total_units(items), 'names': item_names(items)}\n",
+  "code_edit_expected": "VERSION = '1.0'\nDEFAULT_CATEGORY = 'general'\n\ndef total_units(items):\n    return sum(row['quantity'] for row in items)\n\ndef item_names(items):\n    return [row['name'] for row in items]\n\ndef describe(items):\n    return {'units': total_units(items), 'names': item_names(items)}\n",
+  "structured_json": "Return only a compact valid JSON object, without Markdown. It must have exactly three keys: status with value ready, count with value 3, and items with value [alpha, beta, gamma] as three strings in that order. End immediately after the object.",
+  "tool_call": "Call benchmark_lookup exactly once with record_id 17 and category inventory. Do not add commentary. This is a simulated function for validating the response; it will not be executed.",
+  "sustained": "Write a long, coherent technical guide to designing a reproducible inference benchmark. Cover prompt processing, token generation, occupied context, GPU memory residency, disk reads, speculation, streaming latency, measurement noise, and correctness. Include explanations and examples, avoid repetition, and continue developing the guide for at least 1500 words.",
+  "context_question": "After reading the reference material, write several paragraphs explaining how the project's asynchronous I/O, GPU execution, and request settings work together. Identify tradeoffs and avoid repeating the source verbatim.",
+  "context_sources": [
+    "README.md",
+    "src/native/win_file.cpp",
+    "src/desktop/EngineManager.cs",
+    "src/desktop/EngineConfig.cs",
+    "src/native/main.cpp",
+    "gufo-overlay/src/models/qwen38_flash_next/engine.cpp",
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/executor.cpp",
+    "gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp"
+  ]
+}

@@ -22,6 +22,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -35,11 +36,16 @@
 #include <utility>
 #include <vector>
 
+#include "memory_guard.hpp"
+#include "chat_output.hpp"
 #include "src/core/platform/device_memory.hpp"
 #include "src/core/platform/tuning.hpp"
 #include "src/core/image.hpp"
 #include "src/core/json.hpp"
 #include "src/core/sampling.hpp"
+
+extern "C" void qfn_q8_shallow_reset(void);
+extern "C" unsigned long long qfn_q8_shallow_launches(void);
 #include "src/core/session_mode.hpp"
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/vision/prompt.hpp"
@@ -69,9 +75,12 @@ using gufo::json::Value;
 
 namespace {
 
-constexpr std::string_view kRuntimeRevision = "fnv-async-halo-pipeline-v12";
+constexpr std::string_view kRuntimeRevision = "fnv-mtp-cache-replay-v13";
 
 struct Config {
+  fs::path config_path;
+  fs::path studio_config_path;
+  std::string agent_prompt;
   std::string model;
   std::string mtp;
   std::string mmproj;
@@ -113,6 +122,7 @@ struct Config {
 };
 
 struct Metrics {
+  Value configured_settings{Value::object()};
   LookupPolicy lookup_policy{};
   std::uint32_t lookup_capacity{0};
   std::uint64_t prompt_tokens{0};
@@ -135,7 +145,9 @@ struct Metrics {
   std::uint32_t prefill_batch{2048};
   bool thinking{false};
   bool preserve_thinking{false};
+  bool requested_preserve_thinking{false};
   std::string reasoning_effort{"OFF"};
+  std::string requested_reasoning_effort{"OFF"};
   std::uint32_t compact_verification_candidates{0};
   std::uint32_t mtp_draft_vocab_size{0};
   std::uint64_t mtp_reduced_vocab_proposals{0};
@@ -154,9 +166,17 @@ struct Metrics {
   std::uint64_t async_halo_chains{0};
   std::uint64_t async_halo_draft_tokens{0};
   std::uint64_t mtp_fresh_resets{0};
+  std::string mtp_cost_profile{"Gufo calibrated"};
   std::uint64_t mtp_drafted{0};
   std::uint64_t mtp_accepted{0};
   double mtp_avg_proposal_confidence{0};
+  std::size_t requested_max_tokens{0};
+  std::size_t effective_max_tokens{0};
+  std::int64_t requested_seed{-1};
+  std::int64_t effective_seed{-1};
+  bool stream{false};
+  Value requested_settings{Value::object()};
+  Value effective_request_settings{Value::object()};
   std::uint64_t lookup_cycles{0};
   std::uint64_t lookup_drafted{0};
   std::uint64_t lookup_accepted{0};
@@ -178,17 +198,7 @@ struct Metrics {
   fnvprof::Report profile{};
 };
 
-struct ToolCall {
-  std::string id;
-  std::string name;
-  Value arguments{Value::object()};
-};
-
-struct ParsedOutput {
-  std::string content;
-  std::string reasoning;
-  std::vector<ToolCall> calls;
-};
+using ToolCall = fnvchat::ToolCall;
 
 struct ChatInput {
   std::vector<gufo::tokenization::ChatMessage> messages;
@@ -200,6 +210,16 @@ struct ChatInput {
   gufo::tokenization::QwenReasoningEffort reasoning_effort{
       gufo::tokenization::QwenReasoningEffort::kMedium};
   bool add_vision_id{false};
+};
+
+struct ResolvedChatRequest {
+  ChatInput chat;
+  gufo::sampling::SamplingConfig sampling;
+  std::size_t requested_max_tokens{0};
+  std::int64_t requested_seed{-1};
+  bool stream{false};
+  bool profile{false};
+  bool include_usage{false};
 };
 
 struct HttpRequest {
@@ -253,6 +273,35 @@ double ReadFiniteNumber(const Value* value, std::string_view name,
   return value->as_double();
 }
 
+std::size_t ReadSize(const Value* value, std::string_view name,
+                     std::size_t fallback) {
+  if (value == nullptr || value->is_null()) return fallback;
+  const double number = ReadFiniteNumber(value, name, 0);
+  if (number < 0 || std::floor(number) != number ||
+      number >= std::ldexp(1.0, std::numeric_limits<std::size_t>::digits))
+    throw std::invalid_argument(std::string(name) + " must be a nonnegative integer");
+  return static_cast<std::size_t>(number);
+}
+
+std::int64_t ReadSeed(const Value* value, std::string_view name,
+                      std::int64_t fallback) {
+  if (value == nullptr || value->is_null()) return fallback;
+  constexpr double kMaxExactJsonInteger = 9007199254740991.0;
+  const double number = ReadFiniteNumber(value, name, -1);
+  if (std::floor(number) != number || number < -1 ||
+      number > kMaxExactJsonInteger)
+    throw std::invalid_argument(std::string(name) +
+                                " must be -1 or an integer from 0 to 9007199254740991");
+  return static_cast<std::int64_t>(number);
+}
+
+bool ReadBool(const Value* value, std::string_view name, bool fallback) {
+  if (value == nullptr || value->is_null()) return fallback;
+  if (!value->is_bool())
+    throw std::invalid_argument(std::string(name) + " must be a boolean");
+  return value->as_bool();
+}
+
 std::size_t CompleteUtf8Prefix(std::string_view text) {
   std::size_t i = 0;
   while (i < text.size()) {
@@ -276,6 +325,7 @@ std::size_t CompleteUtf8Prefix(std::string_view text) {
 
 Config LoadConfig(const fs::path& path) {
   Config c;
+  c.config_path = fs::absolute(path);
   Value root = gufo::json::parse(Slurp(path));
   if (!root.is_object()) throw std::runtime_error("config root must be an object");
   c.model = root.member_str("model");
@@ -314,11 +364,13 @@ Config LoadConfig(const fs::path& path) {
   if (const auto* v = root.find("thinking"); v && v->is_bool()) c.thinking = v->as_bool();
   if (const auto* v = root.find("preserve_thinking"); v && v->is_bool()) c.preserve_thinking = v->as_bool();
   c.reasoning_effort = root.member_str("reasoning_effort", c.reasoning_effort);
+  c.agent_prompt = root.member_str("agent_prompt");
   if (const auto* s = root.find("sampling"); s && s->is_object()) {
     c.sampling.temperature = static_cast<float>(s->member_double("temperature", c.sampling.temperature));
     c.sampling.top_k = static_cast<std::int32_t>(s->member_size("top_k", c.sampling.top_k));
     c.sampling.top_p = static_cast<float>(s->member_double("top_p", c.sampling.top_p));
     c.sampling.min_p = static_cast<float>(s->member_double("min_p", c.sampling.min_p));
+    c.sampling.seed = ReadSeed(s->find("seed"), "sampling.seed", c.sampling.seed);
     c.sampling.repeat_penalty = static_cast<float>(s->member_double("repeat_penalty", c.sampling.repeat_penalty));
     c.sampling.repeat_last_n = s->member_size("repeat_last_n", c.sampling.repeat_last_n);
     c.sampling.frequency_penalty = static_cast<float>(ReadFiniteNumber(s->find("frequency_penalty"), "sampling.frequency_penalty", c.sampling.frequency_penalty));
@@ -444,22 +496,46 @@ bool ParseContent(const Value* content, gufo::tokenization::ChatMessage* message
   return true;
 }
 
+std::string SavedAgentPrompt(const Config& cfg) {
+  // Prompt edits are request settings, so they can be applied without
+  // reloading the model or changing any engine/sampling settings.
+  const auto& path = cfg.studio_config_path.empty() ? cfg.config_path : cfg.studio_config_path;
+  if (path.empty() || !fs::exists(path)) return cfg.agent_prompt;
+  const auto saved = gufo::json::parse(Slurp(path));
+  const auto* prompt = saved.find("agent_prompt");
+  if (!prompt) return cfg.agent_prompt;
+  if (!prompt->is_string()) throw std::invalid_argument("saved agent_prompt must be a string");
+  return prompt->get_str();
+}
+
 ChatInput ParseChat(const Value& body, const Config& cfg) {
   ChatInput out;
   out.enable_thinking = cfg.thinking;
   out.preserve_thinking = cfg.preserve_thinking;
   out.reasoning_effort = ParseEffort(cfg.reasoning_effort);
 
-  if (const auto* kwargs = body.find("chat_template_kwargs"); kwargs && kwargs->is_object()) {
-    if (const auto* v = kwargs->find("enable_thinking"); v && v->is_bool()) out.enable_thinking = v->as_bool();
-    if (const auto* v = kwargs->find("preserve_thinking"); v && v->is_bool()) out.preserve_thinking = v->as_bool();
-    if (const auto* v = kwargs->find("reasoning_effort"); v && v->is_string()) {
+  if (const auto* kwargs = body.find("chat_template_kwargs"); kwargs && !kwargs->is_null()) {
+    if (!kwargs->is_object())
+      throw std::invalid_argument("chat_template_kwargs must be an object");
+    out.enable_thinking = ReadBool(kwargs->find("enable_thinking"),
+                                   "chat_template_kwargs.enable_thinking",
+                                   out.enable_thinking);
+    out.preserve_thinking = ReadBool(kwargs->find("preserve_thinking"),
+                                     "chat_template_kwargs.preserve_thinking",
+                                     out.preserve_thinking);
+    out.add_vision_id = ReadBool(kwargs->find("add_vision_id"),
+                                 "chat_template_kwargs.add_vision_id",
+                                 out.add_vision_id);
+    if (const auto* v = kwargs->find("reasoning_effort"); v && !v->is_null()) {
+      if (!v->is_string())
+        throw std::invalid_argument("chat_template_kwargs.reasoning_effort must be a string");
       if (v->get_str() == "off" || v->get_str() == "none") out.enable_thinking = false;
       else out.reasoning_effort = ParseEffort(v->get_str());
     }
-    if (const auto* v = kwargs->find("add_vision_id"); v && v->is_bool()) out.add_vision_id = v->as_bool();
   }
-  if (const auto* v = body.find("reasoning_effort"); v && v->is_string()) {
+  if (const auto* v = body.find("reasoning_effort"); v && !v->is_null()) {
+    if (!v->is_string())
+      throw std::invalid_argument("reasoning_effort must be a string");
     if (v->get_str() == "off" || v->get_str() == "none") out.enable_thinking = false;
     else out.reasoning_effort = ParseEffort(v->get_str());
   }
@@ -467,6 +543,13 @@ ChatInput ParseChat(const Value& body, const Config& cfg) {
   const auto* messages = body.find("messages");
   if (!messages || !messages->is_array() || messages->empty())
     throw std::invalid_argument("messages must be a non-empty array");
+  std::string agent_prompt;
+  if (const auto* prompt = body.find("agent_prompt"); prompt && !prompt->is_null()) {
+    if (!prompt->is_string()) throw std::invalid_argument("agent_prompt must be a string");
+    agent_prompt = prompt->get_str();
+  }
+  if (!agent_prompt.empty())
+    out.messages.emplace_back(gufo::tokenization::ChatRole::kSystem, std::move(agent_prompt));
   gufo::core::ImageReadBudget budget;
   for (const auto& item : messages->items()) {
     if (!item.is_object()) throw std::invalid_argument("message must be an object");
@@ -515,32 +598,86 @@ ChatInput ParseChat(const Value& body, const Config& cfg) {
     }
   }
   if (const auto* choice = body.find("tool_choice"); choice && choice->is_string()) {
+    if (choice->get_str() != "auto" && choice->get_str() != "required" && choice->get_str() != "none")
+      throw std::invalid_argument("unsupported tool_choice");
     out.tool_required = choice->get_str() == "required";
     out.tool_none = choice->get_str() == "none";
+  } else if (choice && choice->is_object()) {
+    const auto* function = choice->find("function");
+    const auto name = function ? function->member_str("name") : std::string{};
+    if (choice->member_str("type") != "function" || name.empty())
+      throw std::invalid_argument("invalid named tool_choice");
+    std::erase_if(out.tools, [&](const auto& tool) { return tool.name != name; });
+    out.tool_required = true;
   }
   if (out.tool_none) out.tools.clear();
+  if (out.tool_required && out.tools.empty())
+    throw std::invalid_argument("tool_choice requires an available function");
   return out;
 }
 
 gufo::sampling::SamplingConfig ParseSampling(const Value& body, const Config& cfg) {
   auto s = cfg.sampling;
-  if (const auto* v = body.find("temperature"); v && v->is_number()) s.temperature = static_cast<float>(v->as_double());
-  if (const auto* v = body.find("top_p"); v && v->is_number()) s.top_p = static_cast<float>(v->as_double());
-  if (const auto* v = body.find("top_k"); v && v->is_number()) s.top_k = static_cast<std::int32_t>(v->as_double());
-  if (const auto* v = body.find("min_p"); v && v->is_number()) s.min_p = static_cast<float>(v->as_double());
-  if (const auto* v = body.find("seed"); v && v->is_number()) s.seed = static_cast<std::int64_t>(v->as_double());
-  if (const auto* v = body.find("repeat_penalty"); v && v->is_number()) s.repeat_penalty = static_cast<float>(v->as_double());
-  if (const auto* v = body.find("repeat_last_n"); v && v->is_number()) s.repeat_last_n = v->as_size(s.repeat_last_n);
-  if (const auto* v = body.find("frequency_penalty"); v && v->is_number()) s.frequency_penalty = static_cast<float>(v->as_double());
-  if (const auto* v = body.find("presence_penalty"); v && v->is_number()) s.presence_penalty = static_cast<float>(v->as_double());
+  s.temperature = static_cast<float>(ReadFiniteNumber(body.find("temperature"), "temperature", s.temperature));
+  s.top_p = static_cast<float>(ReadFiniteNumber(body.find("top_p"), "top_p", s.top_p));
+  const auto top_k = ReadSize(body.find("top_k"), "top_k", static_cast<std::size_t>(s.top_k));
+  if (top_k > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
+    throw std::invalid_argument("top_k exceeds the supported integer range");
+  s.top_k = static_cast<std::int32_t>(top_k);
+  s.min_p = static_cast<float>(ReadFiniteNumber(body.find("min_p"), "min_p", s.min_p));
+  s.seed = ReadSeed(body.find("seed"), "seed", s.seed);
+  s.repeat_penalty = static_cast<float>(ReadFiniteNumber(body.find("repeat_penalty"), "repeat_penalty", s.repeat_penalty));
+  s.repeat_last_n = ReadSize(body.find("repeat_last_n"), "repeat_last_n", s.repeat_last_n);
+  s.frequency_penalty = static_cast<float>(ReadFiniteNumber(body.find("frequency_penalty"), "frequency_penalty", s.frequency_penalty));
+  s.presence_penalty = static_cast<float>(ReadFiniteNumber(body.find("presence_penalty"), "presence_penalty", s.presence_penalty));
   s.Validate();
   return s;
 }
 
 std::size_t MaxTokens(const Value& body, const Config& cfg) {
-  if (const auto* v = body.find("max_completion_tokens"); v && v->is_number()) return v->as_size(cfg.default_max_tokens);
-  if (const auto* v = body.find("max_tokens"); v && v->is_number()) return v->as_size(cfg.default_max_tokens);
-  return cfg.default_max_tokens;
+  const auto requested = [&]() {
+    if (const auto* v = body.find("max_completion_tokens"); v && !v->is_null())
+      return ReadSize(v, "max_completion_tokens", cfg.default_max_tokens);
+    if (const auto* v = body.find("max_tokens"); v && !v->is_null())
+      return ReadSize(v, "max_tokens", cfg.default_max_tokens);
+    return cfg.default_max_tokens;
+  }();
+  if (requested == 0) throw std::invalid_argument("max_tokens must be a positive integer");
+  return requested;
+}
+
+std::size_t EffectiveMaxTokens(std::size_t requested, std::size_t prompt_tokens,
+                               std::size_t context_tokens) {
+  if (prompt_tokens >= context_tokens) return 0;
+  return std::min(requested, context_tokens - prompt_tokens);
+}
+
+std::int64_t ResolveActualSeed(std::int64_t requested_seed) {
+  if (requested_seed >= 0) return requested_seed;
+  std::random_device entropy;
+  const std::uint64_t bits =
+      (static_cast<std::uint64_t>(entropy()) << 32U) ^ entropy();
+  return static_cast<std::int64_t>(bits & static_cast<std::uint64_t>(
+                                              std::numeric_limits<std::int64_t>::max()));
+}
+
+ResolvedChatRequest ResolveChatRequest(const Value& body, const Config& cfg) {
+  ResolvedChatRequest request;
+  request.chat = ParseChat(body, cfg);
+  request.sampling = ParseSampling(body, cfg);
+  request.requested_max_tokens = MaxTokens(body, cfg);
+  request.requested_seed = request.sampling.seed;
+  request.sampling.seed = ResolveActualSeed(request.requested_seed);
+  request.stream = ReadBool(body.find("stream"), "stream", false);
+  request.profile = ReadBool(body.find("flashnext_profile"), "flashnext_profile", false);
+
+  if (const auto* options = body.find("stream_options"); options && !options->is_null()) {
+    if (!options->is_object())
+      throw std::invalid_argument("stream_options must be an object");
+    request.include_usage = ReadBool(options->find("include_usage"),
+                                     "stream_options.include_usage", false);
+  }
+  return request;
 }
 
 std::vector<std::int32_t> ToI32(std::span<const gufo::tokenization::TokenId> src) {
@@ -557,87 +694,105 @@ std::vector<gufo::sampling::TokenId> ToSampler(std::span<const std::int32_t> src
   return out;
 }
 
-std::optional<Value> TryJson(std::string_view text) {
-  try { return gufo::json::parse(text); } catch (...) { return std::nullopt; }
-}
-
-std::vector<ToolCall> ParseToolCalls(std::string_view text) {
-  std::vector<ToolCall> calls;
-  constexpr std::string_view open = "<tool_call>";
-  constexpr std::string_view close = "</tool_call>";
-  std::size_t pos = 0;
-  while ((pos = text.find(open, pos)) != std::string_view::npos) {
-    const std::size_t begin = pos + open.size();
-    const std::size_t end = text.find(close, begin);
-    if (end == std::string_view::npos) break;
-    std::string body = Trim(text.substr(begin, end - begin));
-    ToolCall call;
-    call.id = RandomId("call_");
-    if (auto parsed = TryJson(body); parsed && parsed->is_object()) {
-      call.name = parsed->member_str("name");
-      if (const auto* args = parsed->find("arguments"); args && args->is_object()) call.arguments = *args;
-    } else if (body.starts_with("<function=")) {
-      const auto nend = body.find('>');
-      if (nend != std::string::npos) {
-        call.name = Trim(std::string_view(body).substr(10, nend - 10));
-        Value args = Value::object();
-        std::size_t p = nend + 1;
-        while ((p = body.find("<parameter=", p)) != std::string::npos) {
-          const auto pe = body.find('>', p);
-          const auto ce = body.find("</parameter>", pe);
-          if (pe == std::string::npos || ce == std::string::npos) break;
-          const std::string name = Trim(std::string_view(body).substr(p + 11, pe - (p + 11)));
-          const std::string raw = Trim(std::string_view(body).substr(pe + 1, ce - pe - 1));
-          if (auto v = TryJson(raw)) args[name] = *v; else args[name] = raw;
-          p = ce + 12;
-        }
-        call.arguments = std::move(args);
-      }
-    }
-    if (!call.name.empty()) calls.push_back(std::move(call));
-    pos = end + close.size();
-  }
-  return calls;
-}
-
-ParsedOutput ParseOutput(std::string raw, bool thinking, bool tools_enabled) {
-  ParsedOutput out;
-  std::string working = std::move(raw);
-  if (thinking) {
-    if (working.rfind("<think>", 0) == 0) working.erase(0, 7);
-    const auto end = working.find("</think>");
-    if (end != std::string::npos) {
-      out.reasoning = Trim(std::string_view(working).substr(0, end));
-      working.erase(0, end + 8);
-      while (!working.empty() && (working.front() == '\n' || working.front() == '\r')) working.erase(working.begin());
-    }
-  } else {
-    const auto begin = working.find("<think>");
-    const auto end = working.find("</think>");
-    if (begin != std::string::npos && end != std::string::npos && end > begin) {
-      out.reasoning = Trim(std::string_view(working).substr(begin + 7, end - begin - 7));
-      working.erase(begin, end + 8 - begin);
-    }
-  }
-  if (tools_enabled) {
-    out.calls = ParseToolCalls(working);
-    if (!out.calls.empty()) {
-      const auto marker = working.find("<tool_call>");
-      if (marker != std::string::npos) working.resize(marker);
-    }
-  }
-  out.content = Trim(working);
-  return out;
-}
-
 std::string FormatFixed(double value, int digits) {
   std::ostringstream out;
   out << std::fixed << std::setprecision(digits) << value;
   return out.str();
 }
 
+Value ConfigSettingsJson(const Config& c) {
+  Value v = Value::object();
+  v["active_config"] = c.config_path.string();
+  v["model"] = c.model;
+  v["mtp"] = c.mtp;
+  v["mmproj"] = c.mmproj;
+  v["host"] = c.host;
+  v["port"] = c.port;
+  v["context"] = static_cast<unsigned long long>(c.context);
+  v["draft_max"] = static_cast<unsigned long long>(c.draft_max);
+  v["draft_confidence"] = c.draft_confidence;
+  v["mtp_proposal_mode"] = c.mtp_proposal_mode;
+  v["mtp_draft_vocabulary"] = c.mtp_draft_vocabulary;
+  v["prefill_batch"] = static_cast<unsigned long long>(c.prefill_batch);
+  v["context_lookup"] = c.context_lookup;
+  v["context_lookup_min_ngram"] = static_cast<unsigned long long>(c.context_lookup_min_ngram);
+  v["context_lookup_max_ngram"] = static_cast<unsigned long long>(c.context_lookup_max_ngram);
+  v["context_lookup_window"] = static_cast<unsigned long long>(c.context_lookup_window);
+  v["context_lookup_min_draft"] = static_cast<unsigned long long>(c.context_lookup_min_draft);
+  v["context_lookup_max_draft"] = static_cast<unsigned long long>(c.context_lookup_max_draft);
+  v["context_lookup_policy"] = c.context_lookup_policy;
+  v["context_lookup_capacity"] = static_cast<unsigned long long>(c.context_lookup_capacity);
+  v["memory_guard"] = c.memory_guard;
+  v["memory_guard_min_available_gib"] = c.memory_guard_min_available_gib;
+  v["sessions"] = static_cast<unsigned long long>(c.sessions);
+  v["default_max_tokens"] = static_cast<unsigned long long>(c.default_max_tokens);
+  v["thinking"] = c.thinking;
+  v["preserve_thinking"] = c.preserve_thinking;
+  v["reasoning_effort"] = c.reasoning_effort;
+  Value sampling = Value::object();
+  sampling["temperature"] = c.sampling.temperature;
+  sampling["top_p"] = c.sampling.top_p;
+  sampling["top_k"] = c.sampling.top_k;
+  sampling["min_p"] = c.sampling.min_p;
+  sampling["repeat_penalty"] = c.sampling.repeat_penalty;
+  sampling["repeat_last_n"] = static_cast<unsigned long long>(c.sampling.repeat_last_n);
+  sampling["frequency_penalty"] = c.sampling.frequency_penalty;
+  sampling["presence_penalty"] = c.sampling.presence_penalty;
+  sampling["seed"] = static_cast<long long>(c.sampling.seed);
+  v["sampling"] = std::move(sampling);
+  return v;
+}
+
+std::string FormatRequestedEffectiveRequest(const Metrics& m) {
+  std::ostringstream o;
+  const auto pair = [&](std::string_view name, const std::string& requested,
+                        const std::string& effective,
+                        std::string_view reason = {}) {
+    o << name << " requested=" << requested << " effective=" << effective;
+    if (!reason.empty()) o << " reason=" << reason;
+    o << "\n";
+  };
+  o << "REQUESTED / EFFECTIVE REQUEST SETTINGS\n";
+  pair("max_tokens", std::to_string(m.requested_max_tokens),
+       std::to_string(m.effective_max_tokens),
+       m.requested_max_tokens != m.effective_max_tokens ? "context_limit" : "");
+  pair("temperature", FormatFixed(m.temperature, 6), FormatFixed(m.temperature, 6));
+  pair("top_p", FormatFixed(m.top_p, 6), FormatFixed(m.top_p, 6));
+  pair("top_k", std::to_string(m.top_k), std::to_string(m.top_k));
+  pair("min_p", FormatFixed(m.min_p, 6), FormatFixed(m.min_p, 6));
+  pair("repeat_penalty", FormatFixed(m.repeat_penalty, 6), FormatFixed(m.repeat_penalty, 6));
+  pair("repeat_last_n", std::to_string(m.repeat_last_n), std::to_string(m.repeat_last_n));
+  pair("frequency_penalty", FormatFixed(m.frequency_penalty, 6), FormatFixed(m.frequency_penalty, 6));
+  pair("presence_penalty", FormatFixed(m.presence_penalty, 6), FormatFixed(m.presence_penalty, 6));
+  pair("seed", std::to_string(m.requested_seed), std::to_string(m.effective_seed),
+       m.requested_seed < 0 ? "random_default" : "");
+  pair("thinking", m.thinking ? "true" : "false", m.thinking ? "true" : "false");
+  pair("preserve_thinking", m.requested_preserve_thinking ? "true" : "false",
+       m.preserve_thinking ? "true" : "false",
+       m.requested_preserve_thinking != m.preserve_thinking ? "thinking_disabled" : "");
+  pair("reasoning_effort", m.requested_reasoning_effort,
+       m.thinking ? m.reasoning_effort : "OFF",
+       !m.thinking && m.requested_reasoning_effort != "OFF" ? "thinking_disabled" : "");
+  pair("stream", m.stream ? "true" : "false", m.stream ? "true" : "false");
+  const auto* requested_policy = m.requested_settings.find("context_lookup_policy");
+  pair("context_lookup_policy", requested_policy ? requested_policy->get_str() : "unknown",
+       LookupModeName(m.lookup_policy.mode), m.context_lookup_enabled ? "" : "lookup_inactive");
+  return o.str();
+}
+
 std::string FormatEffectiveSettings(const Metrics& m) {
   std::ostringstream o;
+  o << "ENGINE SETTINGS SNAPSHOT (loaded configuration; request overrides below)\n";
+  for (const auto& [key, value] : m.configured_settings.members()) {
+    if (value.is_object()) {
+      for (const auto& [name, setting] : value.members())
+        o << key << "." << name << ": " << setting.dump() << "\n";
+    } else {
+      o << key << ": " << value.dump() << "\n";
+    }
+  }
+  o << "\n";
+  o << FormatRequestedEffectiveRequest(m);
   o << "EFFECTIVE SETTINGS\n";
   o << "Thinking: " << (m.thinking ? "ON" : "OFF") << "\n";
   o << "Preserve thinking: " << (m.preserve_thinking ? "ON" : "OFF") << "\n";
@@ -648,17 +803,39 @@ std::string FormatEffectiveSettings(const Metrics& m) {
   o << "Min P: " << FormatFixed(m.min_p, 2) << "\n";
   o << "Repeat penalty: " << FormatFixed(m.repeat_penalty, 2) << "\n";
   o << "Repeat last N: " << m.repeat_last_n << "\n";
+  o << "Frequency penalty: " << FormatFixed(m.frequency_penalty, 6) << "\n";
+  o << "Presence penalty: " << FormatFixed(m.presence_penalty, 6) << "\n";
+  o << "Max tokens: " << m.effective_max_tokens << "\n";
+  o << "Seed: " << m.effective_seed << "\n";
+  o << "Stream: " << (m.stream ? "ON" : "OFF") << "\n";
   o << "MTP draft max: " << m.draft_max << "\n";
-  o << "MTP draft confidence: " << FormatFixed(m.draft_confidence, 2) << "\n";
+  o << "MTP draft confidence: " << FormatFixed(m.draft_confidence, 2)
+    << (m.mtp_proposal_mode == "halo_greedy"
+            ? " (ignored in halo-greedy; saved for distribution mode)"
+            : " (sampled MTP cutoff)")
+    << "\n";
   o << "MTP proposal mode: " << MtpProposalModeDisplay(m.mtp_proposal_mode) << "\n";
+  o << "MTP draft vocabulary: " << m.configured_settings.member_str("mtp_draft_vocabulary")
+    << " (" << m.mtp_draft_vocab_size << " tokens)\n";
   o << "Prefill batch: " << m.prefill_batch << " (real Gufo max_batch)\n";
   o << "Context lookup: " << (m.context_lookup_enabled ? "ON (native exact-verification lane)" : "OFF") << "\n";
-  o << "MTP cost profile: Gufo calibrated\n";
+  o << "Lookup policy: " << LookupModeName(m.lookup_policy.mode)
+    << (m.context_lookup_enabled ? "" : " (inactive)") << "\n";
+  o << "Lookup starting width: " << m.lookup_policy.starting_width << "\n";
+  o << "Lookup maximum width: " << (m.lookup_policy.mode == LookupMode::kFixed6 ? 6 : 16) << "\n";
+  o << "Lookup final width: " << m.lookup_policy.active_width << "\n";
+  o << "Lookup capacity: " << m.lookup_capacity << "\n";
+  o << "Lookup reset each request: ON\n";
+  o << "Lookup promoted: " << (m.lookup_policy.promotions ? "YES" : "NO") << "\n";
+  if (m.lookup_policy.promotions)
+    o << "Lookup promotion output token: " << m.lookup_policy.promotion_token
+      << "; lookup round: " << m.lookup_policy.promotion_round << "\n";
+  o << "MTP cost profile: " << m.mtp_cost_profile << "\n";
   o << "MTP hidden normalization: per-HC-stream\n";
   o << "MTP async halo chain: "
-    << ((m.mtp_proposal_mode == "halo_greedy" && !(m.draft_confidence > 0.0))
+    << (m.mtp_proposal_mode == "halo_greedy"
             ? "ON (GPU feedback; one chain-end sync)"
-            : "OFF (requires halo-greedy + confidence 0.00)")
+            : "OFF (distribution proposal mode)")
     << "\n";
   o << "Verification frontier: GPU-retained + lazy full-row D2H\n";
   o << "MTP draft candidate support: 256\n";
@@ -708,7 +885,11 @@ std::string FormatProfile(const Metrics& m) {
   o << "MTP-only drafted              " << m.mtp_drafted << "\n";
   o << "MTP-only accepted             " << m.mtp_accepted << "\n";
   o << "MTP-only acceptance           " << FormatFixed(mtp_acceptance * 100.0, 1) << "%\n";
-  o << "MTP avg proposal confidence   " << FormatFixed(m.mtp_avg_proposal_confidence, 3) << "\n";
+  o << "MTP avg proposal confidence   "
+    << (m.mtp_proposal_mode == "halo_greedy"
+            ? "N/A (halo-greedy has no calibrated proposal confidence)"
+            : FormatFixed(m.mtp_avg_proposal_confidence, 3))
+    << "\n";
   o << "Lookup cycles                 " << m.lookup_cycles << "\n";
   o << "Lookup drafted                " << m.lookup_drafted << "\n";
   o << "Lookup accepted               " << m.lookup_accepted << "\n";
@@ -718,7 +899,7 @@ std::string FormatProfile(const Metrics& m) {
   o << "MTP draft confidence           " << FormatFixed(m.draft_confidence, 2) << "\n";
   o << "MTP proposal mode              " << MtpProposalModeDisplay(m.mtp_proposal_mode) << "\n";
   o << "Prefill batch                  " << m.prefill_batch << "\n";
-  o << "MTP cost profile              Gufo calibrated\n";
+  o << "MTP cost profile              " << m.mtp_cost_profile << "\n";
   o << "MTP hidden normalization      per-HC-stream\n";
   o << "MTP draft candidate support   256\n";
   o << "MTP target verify shortlist   ";
@@ -755,6 +936,7 @@ std::string FormatProfile(const Metrics& m) {
     << FormatFixed(p.mtp_cycles ? p.mtp_verification_ms / p.mtp_cycles : 0.0, 2) << "\n";
   o << "MTP verify ms / output        "
     << FormatFixed(p.mtp_output_tokens ? p.mtp_verification_ms / p.mtp_output_tokens : 0.0, 3) << "\n";
+  o << "Q8 shallow verify launches    " << qfn_q8_shallow_launches() << "\n";
   o << "Lookup rounds                 " << p.lookup_cycles << "\n";
   o << "Lookup width / round          "
     << FormatFixed(p.lookup_cycles ? static_cast<double>(p.lookup_drafted) / p.lookup_cycles : 0.0, 2) << "\n";
@@ -934,7 +1116,11 @@ std::string FormatLastRequest(const Metrics& m) {
   o << "MTP-only drafted              " << m.mtp_drafted << "\n";
   o << "MTP-only accepted             " << m.mtp_accepted << "\n";
   o << "MTP-only acceptance           " << FormatFixed(mtp_acceptance * 100.0, 1) << "%\n";
-  o << "MTP avg proposal confidence   " << FormatFixed(m.mtp_avg_proposal_confidence, 3) << "\n";
+  o << "MTP avg proposal confidence   "
+    << (m.mtp_proposal_mode == "halo_greedy"
+            ? "N/A (halo-greedy has no calibrated proposal confidence)"
+            : FormatFixed(m.mtp_avg_proposal_confidence, 3))
+    << "\n";
   o << "Lookup cycles                 " << m.lookup_cycles << "\n";
   o << "Lookup drafted                " << m.lookup_drafted << "\n";
   o << "Lookup accepted               " << m.lookup_accepted << "\n";
@@ -951,7 +1137,7 @@ std::string FormatLastRequest(const Metrics& m) {
   o << "Async halo chains              " << m.async_halo_chains << "\n";
   o << "Async halo draft tokens        " << m.async_halo_draft_tokens << "\n";
   o << "MTP fresh-state resets         " << m.mtp_fresh_resets << "\n";
-  o << "Draft confidence applies to sampled MTP. Greedy drafts are unchanged.\n\n";
+  o << "Draft confidence applies to distribution-mode sampled MTP; halo-greedy ignores it.\n\n";
   o << "64-token windows\n";
   if (m.request_windows.empty()) {
     o << "Not enough tokens for a window.\n";
@@ -1013,8 +1199,13 @@ Value LookupPolicyJson(const Metrics& m) {
 
 Value MetricsJson(const Metrics& m) {
   Value v = Value::object();
+  v["configured_settings"] = m.configured_settings;
   v["prompt_tokens"] = static_cast<unsigned long long>(m.prompt_tokens);
   v["completion_tokens"] = static_cast<unsigned long long>(m.completion_tokens);
+  v["max_tokens_requested"] = static_cast<unsigned long long>(m.requested_max_tokens);
+  v["max_tokens_effective"] = static_cast<unsigned long long>(m.effective_max_tokens);
+  v["seed_requested"] = static_cast<long long>(m.requested_seed);
+  v["seed_effective"] = static_cast<long long>(m.effective_seed);
   v["prefill_ms"] = m.prefill_ms;
   v["decode_ms"] = m.decode_ms;
   v["prefill_tokens_per_second"] = m.prefill_tps;
@@ -1027,6 +1218,7 @@ Value MetricsJson(const Metrics& m) {
   v["avg_draft_depth"] = m.avg_draft_depth;
   v["draft_confidence"] = m.draft_confidence;
   v["mtp_proposal_mode"] = m.mtp_proposal_mode;
+  v["mtp_cost_profile"] = m.mtp_cost_profile;
   v["prefill_batch"] = static_cast<unsigned long long>(m.prefill_batch);
   v["compact_verification_candidates"] =
       static_cast<unsigned long long>(m.compact_verification_candidates);
@@ -1042,7 +1234,9 @@ Value MetricsJson(const Metrics& m) {
   v["mtp_draft_tokens"] = static_cast<unsigned long long>(m.mtp_drafted);
   v["mtp_draft_tokens_accepted"] = static_cast<unsigned long long>(m.mtp_accepted);
   v["mtp_acceptance"] = m.mtp_drafted ? static_cast<double>(m.mtp_accepted) / static_cast<double>(m.mtp_drafted) : 0.0;
-  v["mtp_avg_proposal_confidence"] = m.mtp_avg_proposal_confidence;
+  v["mtp_avg_proposal_confidence"] = m.mtp_proposal_mode == "halo_greedy"
+                                            ? Value()
+                                            : Value(m.mtp_avg_proposal_confidence);
   v["lookup_cycles"] = static_cast<unsigned long long>(m.lookup_cycles);
   v["lookup_draft_tokens"] = static_cast<unsigned long long>(m.lookup_drafted);
   v["lookup_policy"] = LookupPolicyJson(m);
@@ -1057,17 +1251,19 @@ Value MetricsJson(const Metrics& m) {
   v["draft_tokens_accepted"] = static_cast<unsigned long long>(m.draft_accepted);
   v["draft_tokens_rejected"] = static_cast<unsigned long long>(m.draft_tokens - m.draft_accepted);
   v["draft_acceptance"] = m.draft_acceptance;
+  v["requested_settings"] = m.requested_settings;
+  v["effective_request_settings"] = m.effective_request_settings;
   v["accepted_per_output_token"] = m.completion_tokens
                                       ? static_cast<double>(m.draft_accepted) / static_cast<double>(m.completion_tokens)
                                       : 0;
-  Value effective = Value::object();
+  Value effective = m.configured_settings;
   effective["thinking"] = m.thinking;
   effective["preserve_thinking"] = m.preserve_thinking;
   effective["reasoning_effort"] = m.thinking ? m.reasoning_effort : "OFF";
   effective["mtp_policy_mode"] = "gufo_calibrated";
+  effective["mtp_cost_profile"] = m.mtp_cost_profile;
   effective["mtp_hidden_normalization"] = "per_hc_stream";
-  effective["mtp_async_halo_chain"] =
-      m.mtp_proposal_mode == "halo_greedy" && !(m.draft_confidence > 0.0);
+  effective["mtp_async_halo_chain"] = m.mtp_proposal_mode == "halo_greedy";
   effective["verification_frontier_transfer"] = "gpu_retained_lazy_d2h";
   effective["compact_verification_candidates"] =
       static_cast<unsigned long long>(m.compact_verification_candidates);
@@ -1079,6 +1275,9 @@ Value MetricsJson(const Metrics& m) {
   effective["repeat_last_n"] = static_cast<unsigned long long>(m.repeat_last_n);
   effective["frequency_penalty"] = m.frequency_penalty;
   effective["presence_penalty"] = m.presence_penalty;
+  effective["max_tokens"] = static_cast<unsigned long long>(m.effective_max_tokens);
+  effective["seed"] = static_cast<long long>(m.effective_seed);
+  effective["stream"] = m.stream;
   effective["draft_max"] = static_cast<unsigned long long>(m.draft_max);
   effective["draft_confidence"] = m.mtp_proposal_mode == "halo_greedy"
                                        ? Value()
@@ -1091,6 +1290,17 @@ Value MetricsJson(const Metrics& m) {
   effective["context_lookup_start_width"] = static_cast<unsigned long long>(m.lookup_policy.starting_width);
   effective["context_lookup_promotion_width"] = m.lookup_policy.mode == LookupMode::kFixed6 ? 6 : 16;
   effective["context_lookup_capacity"] = static_cast<unsigned long long>(m.lookup_capacity);
+  effective["context_lookup_final_width"] = static_cast<unsigned long long>(m.lookup_policy.active_width);
+  effective["context_lookup_promoted"] = m.lookup_policy.promotions != 0;
+  effective["context_lookup_promotion_token_index"] = static_cast<unsigned long long>(m.lookup_policy.promotion_token);
+  Value effective_sampling = Value::object();
+  if (const auto* configured_sampling = m.configured_settings.find("sampling")) {
+    for (const auto& [key, value] : configured_sampling->members()) {
+      const auto* actual = m.effective_request_settings.find(key);
+      effective_sampling[key] = actual ? *actual : value;
+    }
+  }
+  effective["sampling"] = std::move(effective_sampling);
   effective["context_lookup_resets_each_request"] = true;
   effective["mtp_draft_vocab_size"] = static_cast<unsigned long long>(m.mtp_draft_vocab_size);
   effective["tuning"] = TuningJson();
@@ -1296,6 +1506,7 @@ Value MetricsJson(const Metrics& m) {
 
 struct WindowsMemoryHeadroom {
   std::uint64_t available_physical{0};
+  std::uint64_t total_physical{0};
   std::uint64_t available_commit{0};
 };
 
@@ -1304,13 +1515,13 @@ WindowsMemoryHeadroom QueryWindowsMemoryHeadroom() {
   status.dwLength = sizeof(status);
   if (!GlobalMemoryStatusEx(&status)) return {};
   return {static_cast<std::uint64_t>(status.ullAvailPhys),
+          static_cast<std::uint64_t>(status.ullTotalPhys),
           static_cast<std::uint64_t>(status.ullAvailPageFile)};
 }
 
 std::uint64_t WindowsAvailableMemoryBytes() {
   return QueryWindowsMemoryHeadroom().available_physical;
 }
-
 
 void LogDeviceMemory(std::string_view stage) {
   gufo::platform::DeviceMemorySnapshot memory{};
@@ -1402,6 +1613,7 @@ class Runtime {
   struct Result {
     std::string raw;
     Metrics metrics;
+    bool stopped{false};
   };
 
   Result Generate(std::span<const std::int32_t> prompt,
@@ -1413,12 +1625,17 @@ class Runtime {
                   bool thinking = false,
                   bool preserve_thinking = false,
                   std::string_view reasoning_effort = "OFF",
-                  LookupMode lookup_mode = LookupMode::kSticky) {
+                  std::size_t requested_max_tokens = 0,
+                  std::int64_t requested_seed = -1,
+                  bool stream = false,
+                  LookupMode lookup_mode = LookupMode::kSticky,
+                  const std::function<bool()>& cancelled = {}) {
     struct ProfileGuard {
       bool on{false};
       explicit ProfileGuard(bool enable) : on(enable) {
         if (!on) return;
         fnvprof::Reset();
+        qfn_q8_shallow_reset();
         fnvprof::SetEnabled(true);
         fnvprof::SetPhase(fnvprof::Phase::Prefill);
       }
@@ -1437,6 +1654,12 @@ class Runtime {
       session_ = model_->CreateSession(mode, cfg_.context, &error);
       if (!session_) throw std::runtime_error(error);
     }
+    session_->SetCancellationCheck(cancelled);
+    struct CancellationGuard {
+      QfnSession* session;
+      ~CancellationGuard() { session->SetCancellationCheck({}); }
+    } cancellation_guard{session_.get()};
+    if (cancelled && cancelled()) throw std::runtime_error("client disconnected");
     session_->ConfigureVision(std::move(vision));
     session_->ResetDraftPolicy();
     session_->SetDraftConfidence(cfg_.draft_confidence);
@@ -1449,6 +1672,16 @@ class Runtime {
     const auto prefill1 = Clock::now();
     const auto context_capacity = session_->ContextSize();
     const auto context_depth = session_->Position();
+    const std::size_t effective_max_tokens =
+        EffectiveMaxTokens(max_tokens, context_depth, context_capacity);
+    if (effective_max_tokens == 0) {
+      const std::size_t requested = requested_max_tokens == 0
+                                        ? max_tokens
+                                        : requested_max_tokens;
+      throw std::invalid_argument("max_tokens requested=" +
+                                  std::to_string(requested) +
+                                  " effective=0 reason=context_limit");
+    }
     if (profile) {
       fnvprof::SetContext(context_capacity, context_depth);
       fnvprof::SetDraftMax(cfg_.draft_max);
@@ -1458,7 +1691,7 @@ class Runtime {
     auto history = ToSampler(prompt);
     gufo::sampling::SamplerState sampler(sampling, history);
     std::vector<std::int32_t> generated;
-    generated.reserve(max_tokens);
+    generated.reserve(effective_max_tokens);
     std::string stream_pending;
     auto decode0 = Clock::now();
     auto window_start = decode0;
@@ -1493,10 +1726,11 @@ class Runtime {
       window_cycles = 0;
       window_start = now;
     };
-    while (!stop && generated.size() < max_tokens) {
+    while (!stop && generated.size() < effective_max_tokens) {
+      if (cancelled && cancelled()) throw std::runtime_error("client disconnected");
       if ((generated.size() & 31U) == 0) CheckMemoryFloor("generation");
       QfnSession::DecodeResult step;
-      const auto remaining = max_tokens - generated.size();
+      const auto remaining = effective_max_tokens - generated.size();
       if (!session_->DecodeStep(remaining, sampler, &step, &error, true))
         throw std::runtime_error("decode failed: " + error);
       if (step.tokens.empty() && !step.stop) throw std::runtime_error("decode made no progress");
@@ -1532,6 +1766,7 @@ class Runtime {
     const auto decode1 = Clock::now();
     const auto stats1 = session_->Statistics();
     Metrics m;
+    m.configured_settings = ConfigSettingsJson(cfg_);
     m.prompt_tokens = prompt.size();
     m.completion_tokens = generated.size();
     m.prefill_ms = std::chrono::duration<double, std::milli>(prefill1 - prefill0).count();
@@ -1552,7 +1787,9 @@ class Runtime {
     m.prefill_batch = cfg_.prefill_batch;
     m.thinking = thinking;
     m.preserve_thinking = thinking && preserve_thinking;
+    m.requested_preserve_thinking = preserve_thinking;
     m.reasoning_effort = thinking ? std::string(reasoning_effort) : "OFF";
+    m.requested_reasoning_effort = std::string(reasoning_effort);
     m.compact_verification_candidates = model_->HasMtp()
         ? static_cast<std::uint32_t>(
               gufo::models::qwen38_flash_next::
@@ -1566,6 +1803,36 @@ class Runtime {
     m.repeat_last_n = sampling.repeat_last_n;
     m.frequency_penalty = sampling.frequency_penalty;
     m.presence_penalty = sampling.presence_penalty;
+    m.requested_max_tokens = requested_max_tokens == 0
+                                 ? max_tokens
+                                 : requested_max_tokens;
+    m.effective_max_tokens = effective_max_tokens;
+    m.requested_seed = requested_seed;
+    m.effective_seed = sampling.seed;
+    m.stream = stream;
+    Value requested_settings = Value::object();
+    requested_settings["max_tokens"] = static_cast<unsigned long long>(m.requested_max_tokens);
+    requested_settings["temperature"] = m.temperature;
+    requested_settings["top_p"] = m.top_p;
+    requested_settings["top_k"] = m.top_k;
+    requested_settings["min_p"] = m.min_p;
+    requested_settings["repeat_penalty"] = m.repeat_penalty;
+    requested_settings["repeat_last_n"] = static_cast<unsigned long long>(m.repeat_last_n);
+    requested_settings["frequency_penalty"] = m.frequency_penalty;
+    requested_settings["presence_penalty"] = m.presence_penalty;
+    requested_settings["seed"] = static_cast<long long>(m.requested_seed);
+    requested_settings["thinking"] = thinking;
+    requested_settings["preserve_thinking"] = preserve_thinking;
+    requested_settings["reasoning_effort"] = std::string(reasoning_effort);
+    requested_settings["stream"] = stream;
+    requested_settings["context_lookup_policy"] = LookupModeName(lookup_mode);
+    m.requested_settings = requested_settings;
+    Value effective_request_settings = std::move(requested_settings);
+    effective_request_settings["max_tokens"] = static_cast<unsigned long long>(effective_max_tokens);
+    effective_request_settings["seed"] = static_cast<long long>(m.effective_seed);
+    effective_request_settings["preserve_thinking"] = m.preserve_thinking;
+    effective_request_settings["reasoning_effort"] = m.reasoning_effort;
+    m.effective_request_settings = std::move(effective_request_settings);
     m.low_confidence_stops = session_->Statistics().low_confidence_stops - stats0.low_confidence_stops;
     m.compact_frontier_samples = session_->Statistics().compact_frontier_samples - stats0.compact_frontier_samples;
     m.compact_frontier_fallbacks = session_->Statistics().compact_frontier_fallbacks - stats0.compact_frontier_fallbacks;
@@ -1573,6 +1840,7 @@ class Runtime {
     m.async_halo_chains = session_->Statistics().async_halo_chains - stats0.async_halo_chains;
     m.async_halo_draft_tokens = session_->Statistics().async_halo_draft_tokens - stats0.async_halo_draft_tokens;
     m.mtp_fresh_resets = session_->MtpFreshResets();
+    m.mtp_cost_profile = model_->MtpCostProfileName(sampling);
     m.mtp_drafted = stats1.mtp_drafted - stats0.mtp_drafted;
     m.mtp_draft_vocab_size = model_->DraftVocabSize();
     if (m.mtp_draft_vocab_size < model_->VocabSize())
@@ -1606,31 +1874,38 @@ class Runtime {
       std::lock_guard lock(metrics_mutex_);
       last_ = m;
     }
-    return {model_->Decode(generated), m};
+    return {model_->Decode(generated), m, stop};
   }
 
  private:
-  [[nodiscard]] std::uint64_t MemoryFloorBytes() const noexcept {
-    return static_cast<std::uint64_t>(cfg_.memory_guard_min_available_gib *
-                                      static_cast<double>(1ULL << 30));
-  }
   void CheckMemoryFloor(std::string_view stage) const {
     if (!cfg_.memory_guard) return;
     const auto memory = QueryWindowsMemoryHeadroom();
-    const auto floor = MemoryFloorBytes();
-    const bool physical_low =
-        memory.available_physical != 0 && memory.available_physical < floor;
-    const bool commit_low =
-        memory.available_commit != 0 && memory.available_commit < floor;
-    if (physical_low || commit_low) {
+    // This executable is the gfx1151 / Strix Halo engine.
+    const auto decision = DecideWindowsMemoryGuard(
+        {memory.available_physical, memory.total_physical,
+         memory.available_commit, cfg_.memory_guard_min_available_gib, true});
+    constexpr double kGiB = static_cast<double>(1ULL << 30);
+    if (decision.large_uma && stage == "before model load") {
+      std::cout << std::fixed << std::setprecision(1)
+                << "Windows memory guard: Strix Halo large-UMA mode, physical floor "
+                << decision.physical_floor_gib << " GiB (configured "
+                << cfg_.memory_guard_min_available_gib << " GiB), available "
+                << (memory.available_physical / kGiB) << " GiB, commit headroom "
+                << (memory.available_commit / kGiB) << " GiB -> "
+                << (decision.allow ? "PASS" : "FAIL") << "\n"
+                << std::flush;
+    }
+    if (!decision.allow) {
       std::ostringstream message;
-      message << "Windows memory guard stopped " << stage << ": "
-              << std::fixed << std::setprecision(2)
-              << (memory.available_physical / static_cast<double>(1ULL << 30))
+      message << std::fixed << std::setprecision(2)
+              << "Windows memory guard stopped " << stage << ": "
+              << (memory.available_physical / kGiB)
               << " GiB physical available, "
-              << (memory.available_commit / static_cast<double>(1ULL << 30))
-              << " GiB commit headroom; floor is "
-              << cfg_.memory_guard_min_available_gib << " GiB";
+              << (memory.available_commit / kGiB)
+              << " GiB commit headroom; physical floor is "
+              << decision.physical_floor_gib << " GiB, commit floor is "
+              << decision.commit_floor_gib << " GiB";
       throw std::runtime_error(message.str());
     }
   }
@@ -1782,101 +2057,157 @@ std::shared_ptr<const gufo::models::qwen::vision::Prompt> PrepareChatPrompt(
   return nullptr;
 }
 
+// A closed TCP peer must release the single generation slot even if the model
+// is inside prefill or building a large tool argument.
+bool ClientDisconnected(SOCKET client) {
+  fd_set reads;
+  FD_ZERO(&reads);
+  FD_SET(client, &reads);
+  timeval timeout{};
+  const auto ready = select(0, &reads, nullptr, nullptr, &timeout);
+  if (ready == SOCKET_ERROR) return true;
+  if (ready == 0) return false;
+  char byte;
+  return recv(client, &byte, 1, MSG_PEEK) <= 0;
+}
+
 void HandleChat(SOCKET client, Runtime& runtime, const Value& body) {
+  const auto request = ResolveChatRequest(body, runtime.cfg());
   const auto lookup_mode = runtime.LookupRequestMode(body);
-  const auto chat = ParseChat(body, runtime.cfg());
-  const auto sampling = ParseSampling(body, runtime.cfg());
-  const auto max_tokens = MaxTokens(body, runtime.cfg());
-  const bool stream = body.find("stream") && body.find("stream")->is_bool() && body.find("stream")->as_bool();
-  const bool profile = body.find("flashnext_profile") && body.find("flashnext_profile")->is_bool() && body.find("flashnext_profile")->as_bool();
-  const bool include_usage = body.find("stream_options") && body.find("stream_options")->is_object() &&
-      body.find("stream_options")->find("include_usage") && body.find("stream_options")->find("include_usage")->is_bool() &&
-      body.find("stream_options")->find("include_usage")->as_bool();
+  const auto& chat = request.chat;
   std::vector<std::int32_t> prompt;
   auto vision = PrepareChatPrompt(runtime, chat, &prompt);
-  const std::string id = RandomId("chatcmpl-");
-
-  if (stream && chat.tools.empty() && !chat.enable_thinking) {
-    StartSse(client);
-    Value first = Value::object();
-    first["id"] = id; first["object"] = "chat.completion.chunk"; first["model"] = runtime.model()->ModelName();
-    Value choices = Value::array(); Value choice = Value::object(); choice["index"] = 0;
-    Value delta = Value::object(); delta["role"] = "assistant"; choice["delta"] = delta; choice["finish_reason"] = Value(); choices.push_back(choice); first["choices"] = choices;
-    Sse(client, first);
-    auto result = runtime.Generate(prompt, vision, sampling, max_tokens,
-      [&](std::string_view text) {
-        Value chunk = Value::object(); chunk["id"] = id; chunk["object"] = "chat.completion.chunk"; chunk["model"] = runtime.model()->ModelName();
-        Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; Value d = Value::object(); d["content"] = std::string(text); c["delta"] = d; c["finish_reason"] = Value(); cs.push_back(c); chunk["choices"] = cs; Sse(client, chunk);
-      }, profile, chat.enable_thinking,
-      chat.enable_thinking && chat.preserve_thinking,
-      chat.enable_thinking ? EffortName(chat.reasoning_effort) : std::string_view{"OFF"}, lookup_mode);
-    Value end = Value::object(); end["id"] = id; end["object"] = "chat.completion.chunk"; end["model"] = runtime.model()->ModelName();
-    Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; c["delta"] = Value::object(); c["finish_reason"] = "stop"; cs.push_back(c); end["choices"] = cs;
-    if (include_usage) end["usage"] = UsageJson(result.metrics);
-    Sse(client, end);
-    SendAll(client, "data: [DONE]\n\n");
-    return;
+  const auto effective_max_tokens = EffectiveMaxTokens(
+      request.requested_max_tokens, prompt.size(), runtime.cfg().context);
+  if (effective_max_tokens == 0)
+    throw std::invalid_argument("max_tokens requested=" +
+        std::to_string(request.requested_max_tokens) + " effective=0 reason=context_limit");
+  const auto id = RandomId("chatcmpl-");
+  const auto created = static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count());
+  auto chunk = [&](const Value& delta, const Value& finish = Value()) {
+    Value root = Value::object(); root["id"] = id;
+    root["object"] = "chat.completion.chunk"; root["created"] = created;
+    root["model"] = runtime.model()->ModelName();
+    Value choices = Value::array(); Value choice = Value::object();
+    choice["index"] = 0; choice["delta"] = delta; choice["finish_reason"] = finish;
+    choices.push_back(choice); root["choices"] = choices;
+    return root;
+  };
+  auto wire_call = [](const ToolCall& call, std::optional<std::size_t> index = {}) {
+    Value value = Value::object();
+    if (index) value["index"] = *index;
+    value["id"] = call.id; value["type"] = "function";
+    Value fn = Value::object(); fn["name"] = call.name;
+    fn["arguments"] = call.arguments.dump(); value["function"] = fn;
+    return value;
+  };
+  std::vector<Value> tools;
+  for (const auto& tool : chat.tools) {
+    Value definition = Value::object(); definition["name"] = tool.name;
+    definition["parameters"] = gufo::json::parse(tool.parameters_json);
+    tools.push_back(std::move(definition));
   }
-
-  // Tool calls and reasoning are buffered so the final OpenAI structure is
-  // correct rather than leaking template control tokens into content.
-  const auto result = runtime.Generate(
-      prompt, vision, sampling, max_tokens, {}, profile, chat.enable_thinking,
-      chat.enable_thinking && chat.preserve_thinking,
-      chat.enable_thinking ? EffortName(chat.reasoning_effort) : std::string_view{"OFF"}, lookup_mode);
-  const auto parsed = ParseOutput(result.raw, chat.enable_thinking, !chat.tools.empty());
-  if (chat.tool_required && parsed.calls.empty())
-    throw std::runtime_error("tool_choice=required but the model did not produce a tool call");
-
-  if (stream) {
+  fnvchat::Parser parser(chat.enable_thinking, std::move(tools),
+      [] { return RandomId("call_"); },
+      [&](std::string_view text, bool reasoning) {
+        if (!request.stream) return;
+        Value delta = Value::object();
+        delta[reasoning ? "reasoning_content" : "content"] = std::string(text);
+        Sse(client, chunk(delta));
+      },
+      [&](const ToolCall& call, std::size_t index) {
+        if (!request.stream) return;
+        Value calls = Value::array(); calls.push_back(wire_call(call, index));
+        Value delta = Value::object(); delta["tool_calls"] = calls;
+        Sse(client, chunk(delta));
+      });
+  if (request.stream) {
     StartSse(client);
-    Value chunk = Value::object(); chunk["id"] = id; chunk["object"] = "chat.completion.chunk"; chunk["model"] = runtime.model()->ModelName();
-    Value cs = Value::array(); Value c = Value::object(); c["index"] = 0; Value d = Value::object(); d["role"] = "assistant";
-    if (!parsed.reasoning.empty()) d["reasoning_content"] = parsed.reasoning;
-    if (!parsed.content.empty()) d["content"] = parsed.content;
-    if (!parsed.calls.empty()) {
-      Value arr = Value::array();
-      for (std::size_t i = 0; i < parsed.calls.size(); ++i) {
-        Value tc = Value::object(); tc["index"] = i; tc["id"] = parsed.calls[i].id; tc["type"] = "function";
-        Value fn = Value::object(); fn["name"] = parsed.calls[i].name; fn["arguments"] = parsed.calls[i].arguments.dump(); tc["function"] = fn; arr.push_back(tc);
+    Value delta = Value::object(); delta["role"] = "assistant";
+    Sse(client, chunk(delta));
+  }
+  auto heartbeat = Clock::now();
+  const auto cancelled = [&] {
+    if (ClientDisconnected(client)) return true;
+    if (request.stream && Clock::now() - heartbeat >= std::chrono::seconds(2)) {
+      heartbeat = Clock::now();
+      if (!SendAll(client, ": keep-alive\n\n")) return true;
+    }
+    return false;
+  };
+  try {
+    const auto result = runtime.Generate(prompt, vision, request.sampling,
+        effective_max_tokens, [&](std::string_view text) { parser.Feed(text); },
+        request.profile, chat.enable_thinking,
+        chat.enable_thinking && chat.preserve_thinking,
+        chat.enable_thinking ? EffortName(chat.reasoning_effort) : std::string_view{"OFF"},
+        request.requested_max_tokens, request.requested_seed, request.stream,
+        lookup_mode, cancelled);
+    const auto parsed = parser.Finish();
+    if (parsed.incomplete_tool)
+      throw std::runtime_error(result.stopped ? "model ended with an incomplete tool call" :
+          "generation reached max_tokens before the tool call completed; increase max_tokens and retry");
+    if (chat.tool_required && parsed.calls.empty() && result.stopped)
+      throw std::runtime_error("tool_choice=required but the model did not produce a tool call");
+    const auto finish = !result.stopped ? "length" :
+                        parsed.calls.empty() ? "stop" : "tool_calls";
+    if (request.stream) {
+      Sse(client, chunk(Value::object(), Value(finish)));
+      if (request.include_usage) {
+        auto usage = chunk(Value::object()); usage["choices"] = Value::array();
+        usage["usage"] = UsageJson(result.metrics); Sse(client, usage);
       }
-      d["tool_calls"] = arr;
+      SendAll(client, "data: [DONE]\n\n");
+      return;
     }
-    c["delta"] = d; c["finish_reason"] = parsed.calls.empty() ? "stop" : "tool_calls"; cs.push_back(c); chunk["choices"] = cs;
-    if (include_usage) chunk["usage"] = UsageJson(result.metrics);
-    Sse(client, chunk); SendAll(client, "data: [DONE]\n\n");
-    return;
-  }
-
-  Value root = Value::object(); root["id"] = id; root["object"] = "chat.completion"; root["model"] = runtime.model()->ModelName();
-  Value choices = Value::array(); Value choice = Value::object(); choice["index"] = 0;
-  Value msg = Value::object(); msg["role"] = "assistant"; msg["content"] = parsed.content.empty() ? Value() : Value(parsed.content);
-  if (!parsed.reasoning.empty()) msg["reasoning_content"] = parsed.reasoning;
-  if (!parsed.calls.empty()) {
-    Value arr = Value::array();
-    for (const auto& call : parsed.calls) {
-      Value tc = Value::object(); tc["id"] = call.id; tc["type"] = "function";
-      Value fn = Value::object(); fn["name"] = call.name; fn["arguments"] = call.arguments.dump(); tc["function"] = fn; arr.push_back(tc);
+    Value root = Value::object(); root["id"] = id; root["created"] = created;
+    root["object"] = "chat.completion"; root["model"] = runtime.model()->ModelName();
+    Value msg = Value::object(); msg["role"] = "assistant";
+    msg["content"] = parsed.content.empty() ? Value() : Value(parsed.content);
+    if (!parsed.reasoning.empty()) msg["reasoning_content"] = parsed.reasoning;
+    if (!parsed.calls.empty()) {
+      Value calls = Value::array();
+      for (const auto& call : parsed.calls) calls.push_back(wire_call(call));
+      msg["tool_calls"] = calls;
     }
-    msg["tool_calls"] = arr;
+    Value choices = Value::array(); Value choice = Value::object();
+    choice["index"] = 0; choice["message"] = msg; choice["finish_reason"] = finish;
+    choices.push_back(choice); root["choices"] = choices;
+    root["usage"] = UsageJson(result.metrics);
+    SendResponse(client, {200, "application/json", root.dump()});
+  } catch (const std::exception& e) {
+    if (!request.stream) throw;
+    // An HTTP error response cannot be written after SSE headers. Surface the
+    // error in the stream so clients do not mistake a failed request for EOF.
+    Sse(client, ErrorBody(e.what()));
+    SendAll(client, "data: [DONE]\n\n");
   }
-  choice["message"] = msg; choice["finish_reason"] = parsed.calls.empty() ? "stop" : "tool_calls"; choices.push_back(choice); root["choices"] = choices;
-  root["usage"] = UsageJson(result.metrics);
-  SendResponse(client, {200, "application/json", root.dump()});
 }
 
 void HandleCompletion(SOCKET client, Runtime& runtime, const Value& body) {
   const auto lookup_mode = runtime.LookupRequestMode(body);
   const auto prompt = body.member_str("prompt");
   if (prompt.empty()) throw std::invalid_argument("prompt must be a non-empty string");
-  const auto sampling = ParseSampling(body, runtime.cfg());
+  auto sampling = ParseSampling(body, runtime.cfg());
+  const auto requested_seed = sampling.seed;
+  sampling.seed = ResolveActualSeed(requested_seed);
   const auto max_tokens = MaxTokens(body, runtime.cfg());
   auto tokens = runtime.model()->Tokenize(prompt);
-  const bool profile = body.find("flashnext_profile") && body.find("flashnext_profile")->is_bool() && body.find("flashnext_profile")->as_bool();
-  const auto result = runtime.Generate(tokens, nullptr, sampling, max_tokens, {}, profile,
-                                       false, false, "OFF", lookup_mode);
+  const auto effective_max_tokens =
+      EffectiveMaxTokens(max_tokens, tokens.size(), runtime.cfg().context);
+  if (effective_max_tokens == 0)
+    throw std::invalid_argument("max_tokens requested=" +
+                                std::to_string(max_tokens) +
+                                " effective=0 reason=context_limit");
+  const bool profile = ReadBool(body.find("flashnext_profile"),
+                                "flashnext_profile", false);
+  const auto result = runtime.Generate(tokens, nullptr, sampling,
+                                      effective_max_tokens, {}, profile, false,
+                                      false, "OFF", max_tokens, requested_seed,
+                                      false, lookup_mode);
   Value root = Value::object(); root["id"] = RandomId("cmpl-"); root["object"] = "text_completion"; root["model"] = runtime.model()->ModelName();
-  Value choices = Value::array(); Value c = Value::object(); c["index"] = 0; c["text"] = result.raw; c["finish_reason"] = "stop"; choices.push_back(c); root["choices"] = choices; root["usage"] = UsageJson(result.metrics);
+  Value choices = Value::array(); Value c = Value::object(); c["index"] = 0; c["text"] = result.raw; c["finish_reason"] = result.stopped ? "stop" : "length"; choices.push_back(c); root["choices"] = choices; root["usage"] = UsageJson(result.metrics);
   SendResponse(client, {200, "application/json", root.dump()});
 }
 
@@ -1896,17 +2227,17 @@ std::string DashboardHtml(const Runtime& runtime) {
 <div class="card"><div class="label">MTP</div><div class="value" id="mtp">-</div></div>
 <div class="card"><div class="label">Vision</div><div class="value" id="vision">-</div></div>
 <div class="card"><div class="label">API Base</div><div class="value small" id="api">/v1</div></div>
-<div class="card wide"><div class="label">Quick Chat</div><textarea id="prompt">Write a short Python function that returns the nth Fibonacci number.</textarea><div class="row"><input id="maxTokens" type="number" value="256" min="1" max="8192"><button onclick="chat()">Send</button><button onclick="clearOut()">Clear</button></div><pre id="chatOut"></pre></div>
-<div class="card wide"><div class="label">Benchmark</div><div class="row"><input id="benchTokens" type="number" value="512" min="64" max="4096"><button onclick="bench()">Run benchmark</button></div><div class="grid" style="margin-top:12px"><div><div class="label">Prefill</div><div class="metric" id="prefill">-</div></div><div><div class="label">Decode</div><div class="metric" id="decode">-</div></div><div><div class="label">MTP Accept</div><div class="metric" id="accept">-</div></div></div><pre id="benchOut"></pre></div>
+<div class="card wide"><div class="label">Quick Chat</div><textarea id="prompt">Write a short Python function that returns the nth Fibonacci number.</textarea><div class="row"><input id="maxTokens" type="number" value="256" min="1" max="1048576"><button onclick="chat()">Send</button><button onclick="clearOut()">Clear</button></div><pre id="chatOut"></pre></div>
+<div class="card wide"><div class="label">Benchmark</div><div class="row"><input id="benchTokens" type="number" value="512" min="1" max="1048576"><button onclick="bench()">Run benchmark</button></div><div class="grid" style="margin-top:12px"><div><div class="label">Prefill</div><div class="metric" id="prefill">-</div></div><div><div class="label">Decode median · min · max</div><div class="metric" id="decode">-</div></div><div><div class="label">MTP Accept</div><div class="metric" id="accept">-</div></div></div><pre id="benchOut"></pre></div>
 <div class="card wide"><div class="label">Last Metrics</div><pre id="metrics">-</pre></div>
 </div></div>
 <script>
 const base=location.origin;
-async function refresh(){try{const h=await fetch(base+'/health').then(r=>r.json());model.textContent=h.model||'-';mtp.textContent=h.mtp?('ON · '+(h.mtp_proposal_mode||'halo_greedy')+' · confidence '+((h.mtp_proposal_mode||'halo_greedy')==='halo_greedy'?'N/A (sampled-only)':'sampled '+Number(h.draft_confidence||0).toFixed(2))+' · '+h.mtp_draft_vocabulary+' · MTP max '+h.draft_max+' · lookup '+(h.context_lookup_active?(h.context_lookup_policy+' start '+h.context_lookup_start_width+' -> '+h.context_lookup_promotion_width+'; resets each request'):'OFF')):'OFF';vision.textContent=h.vision?'ON':'OFF';statusPill.textContent='online';statusPill.className='pill ok';api.textContent=base+'/v1';const m=await fetch(base+'/metrics').then(r=>r.json());metrics.textContent=JSON.stringify(m,null,2)}catch(e){statusPill.textContent='offline';statusPill.className='pill bad'}}
-async function studioSettings(){const h=await fetch(base+'/health').then(r=>r.json());const s=h.sampling??{};return{temperature:s.temperature,top_p:s.top_p,top_k:s.top_k,min_p:s.min_p,repeat_penalty:s.repeat_penalty,repeat_last_n:s.repeat_last_n,frequency_penalty:s.frequency_penalty,presence_penalty:s.presence_penalty,context_lookup_policy:h.context_lookup_policy,chat_template_kwargs:{enable_thinking:!!h.thinking,preserve_thinking:!!h.thinking&&!!h.preserve_thinking,reasoning_effort:(h.effective_reasoning_effort??'OFF').toLowerCase()}}}
-async function chat(){chatOut.textContent='working…';try{const settings=await studioSettings();const body={model:'local',messages:[{role:'user',content:prompt.value}],max_tokens:+maxTokens.value,stream:false,...settings};const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);chatOut.textContent=j.choices?.[0]?.message?.content||JSON.stringify(j,null,2);refresh()}catch(e){chatOut.textContent='ERROR: '+e.message}}
+async function refresh(){try{const h=await fetch(base+'/health').then(r=>r.json());model.textContent=h.model||'-';mtp.textContent=h.mtp?('ON · '+(h.mtp_proposal_mode||'halo_greedy')+' · confidence '+((h.mtp_proposal_mode||'halo_greedy')==='halo_greedy'?'N/A (sampled-only)':'sampled '+Number(h.draft_confidence||0).toFixed(2))+' · '+h.mtp_draft_vocabulary+' · MTP max '+h.draft_max+' · lookup '+(h.context_lookup_active?(h.context_lookup_policy+' start '+h.context_lookup_start_width+' -> '+h.context_lookup_promotion_width+'; resets each request'):'OFF')):'OFF';vision.textContent=h.vision?'ON':'OFF';statusPill.textContent='online';statusPill.className='pill ok';api.textContent=base+'/v1';if(!maxTokens.dataset.initialized){maxTokens.value=String(h.default_max_tokens||256);maxTokens.dataset.initialized='1'}const m=await fetch(base+'/metrics').then(r=>r.json());metrics.textContent=JSON.stringify(m,null,2)}catch(e){statusPill.textContent='offline';statusPill.className='pill bad'}}
+async function studioSettings(){const h=await fetch(base+'/health').then(r=>r.json());const s=h.sampling??{};return{agent_prompt:h.studio_agent_prompt??'',temperature:s.temperature,top_p:s.top_p,top_k:s.top_k,min_p:s.min_p,repeat_penalty:s.repeat_penalty,repeat_last_n:s.repeat_last_n,frequency_penalty:s.frequency_penalty,presence_penalty:s.presence_penalty,context_lookup_policy:h.context_lookup_policy,seed:s.seed,chat_template_kwargs:{enable_thinking:!!h.thinking,preserve_thinking:!!h.thinking&&!!h.preserve_thinking,reasoning_effort:(h.effective_reasoning_effort??'OFF').toLowerCase()}}}
+async function chat(){chatOut.textContent='working…';try{const settings=await studioSettings();const body={model:'local',messages:[{role:'system',content:'You are a helpful assistant in a standalone chat. No tools, filesystem, shell, or project workspace are available. Answer the user directly. For code and SVG requests, write the complete code in your response.'},{role:'user',content:prompt.value}],max_tokens:+maxTokens.value,stream:false,...settings};const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);chatOut.textContent=j.choices?.[0]?.message?.content||JSON.stringify(j,null,2);refresh()}catch(e){chatOut.textContent='ERROR: '+e.message}}
 function clearOut(){chatOut.textContent=''}
-async function bench(){benchOut.textContent='warming up…';try{const settings=await studioSettings();await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:'Reply with one short sentence about speculative decoding.'}],max_tokens:24,stream:false,...settings})});benchOut.textContent='benchmarking…';const longPrompt=('Explain speculative decoding, memory bandwidth, recurrent state, and long-context inference in technically precise, non-repetitive prose. ').repeat(48);const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages:[{role:'user',content:longPrompt}],max_tokens:+benchTokens.value,stream:false,flashnext_profile:true,...settings})});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);const m=j.usage?.flashnext_velocity||{};prefill.textContent=(m.prefill_tokens_per_second||0).toFixed(2)+' tok/s';decode.textContent=(m.completion_tokens_per_second||0).toFixed(2)+' tok/s';accept.textContent=(((m.mtp_acceptance!==undefined?m.mtp_acceptance:m.draft_acceptance)||0)*100).toFixed(1)+'%';benchOut.textContent=m.profile_text||('64-token windows: '+JSON.stringify(m.speed_windows_64_tokens||[])+'\nDraft: '+(m.draft_tokens_accepted||0)+'/'+(m.draft_tokens||0));refresh()}catch(e){benchOut.textContent='ERROR: '+e.message}}
+async function bench(){benchOut.textContent='warming up…';try{const settings=await studioSettings();const seed=Number(settings.seed)>=0?Number(settings.seed):12345;settings.seed=seed;const longPrompt=('Explain speculative decoding, memory bandwidth, recurrent state, and long-context inference in technically precise, non-repetitive prose. ').repeat(48);const request=(profile)=>({model:'local',messages:[{role:'user',content:longPrompt}],max_tokens:+benchTokens.value,stream:false,flashnext_profile:profile,...settings});const post=async body=>{const r=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j?.error?.message||r.statusText);return j};await post(request(false));benchOut.textContent='measuring 3 canonical runs…';const results=[];for(let i=0;i<3;i++)results.push(await post(request(true)));const rates=results.map(j=>j.usage?.flashnext_velocity?.completion_tokens_per_second||0).sort((a,b)=>a-b);const hashes=await Promise.all(results.map(async j=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(j.choices?.[0]?.message?.content||'')))).map(x=>x.toString(16).padStart(2,'0')).join('')));const settingsJson=results.map(j=>JSON.stringify(j.usage?.flashnext_velocity?.effective_request_settings||{}));const settingsSame=settingsJson.every(x=>x===settingsJson[0]);if(!settingsSame)throw new Error('Measured requests resolved to different effective settings.');const hashesSame=hashes.every(x=>x===hashes[0]);const j=results[2];const m=j.usage?.flashnext_velocity||{};prefill.textContent=(m.prefill_tokens_per_second||0).toFixed(2)+' tok/s';decode.textContent=rates[1].toFixed(2)+' · '+rates[0].toFixed(2)+' · '+rates[2].toFixed(2)+' tok/s';accept.textContent=(((m.mtp_acceptance!==undefined?m.mtp_acceptance:m.draft_acceptance)||0)*100).toFixed(1)+'%';benchOut.textContent='seed='+seed+'\nMeasured decode tok/s='+results.map(x=>x.usage?.flashnext_velocity?.completion_tokens_per_second||0).map(x=>x.toFixed(2)).join(', ')+'\nmedian='+rates[1].toFixed(2)+' min='+rates[0].toFixed(2)+' max='+rates[2].toFixed(2)+' tok/s\nEffective settings identical='+settingsSame+'\nCompletion hashes identical='+hashesSame+'\nHashes='+hashes.join(', ')+'\n\n'+(m.profile_text||('64-token windows: '+JSON.stringify(m.speed_windows_64_tokens||[])));refresh()}catch(e){benchOut.textContent='ERROR: '+e.message}}
 refresh();setInterval(refresh,5000);
 </script></body></html>)FNVHTML";
   return html.str();
@@ -1948,10 +2279,11 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       hipDeviceProp_t device_properties{};
       if (hipGetDeviceProperties(&device_properties, 0) == hipSuccess)
         v["gpu_arch"] = std::string(device_properties.gcnArchName);
-      // Expose the exact startup configuration so the Studio can verify that
-      // Save/Restart launched the engine from the same dist\config.json the UI
-      // just persisted. These are local-only diagnostics, not request overrides.
+      // Expose the immutable startup configuration for Studio's launch check.
+      // The durable Studio file supplies only the explicitly requested prompt.
       v["runtime_revision"] = std::string(kRuntimeRevision);
+      v["mtp_cost_profile"] = std::string(runtime.model()->MtpCostProfileName(runtime.cfg().sampling));
+      v["studio_agent_prompt"] = SavedAgentPrompt(runtime.cfg());
       v["config_model"] = runtime.cfg().model;
       v["config_mtp"] = runtime.cfg().mtp;
       v["config_mmproj"] = runtime.cfg().mmproj;
@@ -2005,6 +2337,7 @@ void HandleConnection(SOCKET client, Runtime& runtime) {
       sampling["frequency_penalty"] = runtime.cfg().sampling.frequency_penalty;
       sampling["presence_penalty"] = runtime.cfg().sampling.presence_penalty;
       sampling["repeat_last_n"] = static_cast<unsigned long long>(runtime.cfg().sampling.repeat_last_n);
+      sampling["seed"] = static_cast<long long>(runtime.cfg().sampling.seed);
       v["sampling"] = std::move(sampling);
       SendResponse(client, {200,"application/json",v.dump()}); closesocket(client); return;
     }
@@ -2069,9 +2402,11 @@ void PrintUsage() {
 int main(int argc, char** argv) {
   try {
     fs::path config_path = "config.json";
+    fs::path studio_config_path;
     for (int i = 1; i < argc; ++i) {
       const std::string arg = argv[i];
       if (arg == "--config" && i + 1 < argc) config_path = argv[++i];
+      else if (arg == "--studio-config" && i + 1 < argc) studio_config_path = fs::absolute(argv[++i]);
       else if (arg == "--help" || arg == "-h") { PrintUsage(); return 0; }
     }
     // Production enables only the Prompt 6 winner. An explicit environment
@@ -2082,7 +2417,9 @@ int main(int argc, char** argv) {
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK)
       throw std::runtime_error("curl_global_init failed");
     struct CurlCleanup { ~CurlCleanup(){ curl_global_cleanup(); } } curl_cleanup;
-    Runtime runtime(LoadConfig(config_path));
+    auto config = LoadConfig(config_path);
+    config.studio_config_path = std::move(studio_config_path);
+    Runtime runtime(std::move(config));
     Serve(runtime);
     return 0;
   } catch (const std::exception& e) {

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <type_traits>
@@ -104,7 +105,8 @@ struct SessionSnapshotHeader {
   MtpLengthState draft_policy;
   std::uint32_t image_identity_bytes;
   std::uint32_t policy_concurrency;
-  std::uint32_t reserved{0};
+  // Bit 0: model has measured costs. Bit 1: request selected those costs.
+  std::uint32_t policy_profile{0};
 };
 static_assert(std::is_trivially_copyable_v<SessionSnapshotHeader>);
 
@@ -235,6 +237,25 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
   if (!m->executor_) {
     return nullptr;
   }
+  bool q8_sidecar = false;
+  if (m->mtp_weights_) {
+    const auto& b=m->mtp_weights_->block;
+    const auto q8=[](const TensorRef* t){return t->type==core::GgmlType::kQ8_0;};
+    const std::array tensors{&b.nextn_eh_proj,&b.attn_q,&b.attn_k,&b.attn_v,
+        &b.attn_out,&b.ffn_gate_exps,
+        &b.ffn_up_exps,&b.ffn_down_exps,&b.shexp_gate,&b.shexp_up,&b.shexp_down};
+    // The matched Q8 artifact retains BF16 indexer projections.
+    q8_sidecar=std::all_of(tensors.begin(),tensors.end(),q8) &&
+        b.indexer_q.type==core::GgmlType::kBF16 && b.indexer_k.type==core::GgmlType::kBF16;
+  }
+  const auto target_basename=std::filesystem::path(model_path).filename().string();
+  const auto sidecar_basename=std::filesystem::path(options.mtp_model_path).filename().string();
+  m->distribution_q8_c1_costs_=MatchesDistributionQ8C1Profile({
+      options.sampled_mtp_proposal_mode==SampledMtpProposalMode::kDistribution,
+      options.draft_vocabulary==DraftVocabulary::kLatinText,q8_sidecar,
+      options.context_lookup,options.decode_concurrency,options.max_context,
+      options.prefill_batch,options.max_draft_tokens,exec.max_speculative,
+      target_basename,sidecar_basename});
   return m;
 }
 
@@ -293,6 +314,16 @@ std::uint32_t Model::PrefillCapacity() const noexcept {
 
 bool Model::HasMtp() const noexcept {
   return device_->has_mtp();
+}
+
+std::string_view Model::MtpCostProfileName(
+    const sampling::SamplingConfig& sampling) const noexcept {
+  // Keep the calibrated profile on the measured compact Top-64 lane only.
+  const bool compact64=sampling.uses_random_sampling() && sampling.top_k>0 &&
+      sampling.top_k<64 && sampling.min_keep<64 && sampling.repeat_penalty>=1.F &&
+      sampling.frequency_penalty==0.F && sampling.presence_penalty==0.F;
+  return distribution_q8_c1_costs_ && compact64
+      ? "Windows distribution Q8 C1 calibrated" : "Gufo calibrated";
 }
 
 std::string Model::ModelName() const {
@@ -444,6 +475,8 @@ std::unique_ptr<SessionSnapshot> Session::SaveSnapshot(
       .image_identity_bytes =
           static_cast<std::uint32_t>(image_identity_.size()),
       .policy_concurrency = model_->DecodeConcurrency(),
+      .policy_profile = (model_->HasDistributionQ8C1Costs() ? 1U : 0U) |
+          (draft_length_.CostProfile()==MtpCostProfile::kDistributionQ8C1 ? 2U : 0U),
   };
   std::memcpy(out, &header, sizeof(header));
   out += sizeof(header);
@@ -497,6 +530,9 @@ bool Session::RestoreSnapshot(std::span<const std::uint8_t> payload,
   }
   if (header.vocab_size != model_->VocabSize() || header.token_count == 0 ||
       header.policy_concurrency != model_->DecodeConcurrency() ||
+      (header.policy_profile & ~3U)!=0 ||
+      (header.policy_profile & 1U)!=(model_->HasDistributionQ8C1Costs() ? 1U : 0U) ||
+      ((header.policy_profile & 2U)!=0 && (header.policy_profile & 1U)==0) ||
       header.token_count > ContextSize() ||
       (header.image_identity_bytes != 0 && header.image_identity_bytes != 32) ||
       payload.size() != SessionSnapshotHostBytes(header.token_count,
@@ -507,6 +543,8 @@ bool Session::RestoreSnapshot(std::span<const std::uint8_t> payload,
     return false;
   }
   auto restored_policy = draft_length_;
+  restored_policy.SetCostProfile((header.policy_profile & 2U)!=0
+      ? MtpCostProfile::kDistributionQ8C1 : MtpCostProfile::kIncumbent);
   if (!restored_policy.Restore(header.draft_policy)) {
     AssignError(error_msg, "session snapshot draft policy is invalid");
     return false;
@@ -770,6 +808,7 @@ void Session::AppendDraft(PendingDecode& pending) {
 
 bool Session::DropLowConfidenceDraft(PendingDecode& pending) {
   if (pending.confidence_stopped || !pending.sampled ||
+      pending.proposal_mode != SampledMtpProposalMode::kDistribution ||
       !(draft_confidence_ > 0.0F) || pending.proposals.empty())
     return false;
   if (!(pending.proposals.back().confidence < draft_confidence_))
@@ -803,6 +842,10 @@ bool Session::PrepareDecode(const DecodeRequest& request,
   const std::size_t room = ContextSize() - tokens_.size();
   const std::size_t cap =
       std::min<std::size_t>({max_tokens, room, exec.max_speculative()});
+  draft_length_.SetCostProfile(
+      MtpEnabled() && ContextSize()==32768 &&
+      model_->MtpCostProfileName(sampler.config())=="Windows distribution Q8 C1 calibrated"
+          ? MtpCostProfile::kDistributionQ8C1 : MtpCostProfile::kIncumbent);
   const std::size_t width =
       MtpEnabled() && cap > 1
           ? 1 + (batch_drafts ? std::min<std::uint32_t>(*batch_drafts, cap - 1)
@@ -954,12 +997,10 @@ bool Session::PrepareDecode(const DecodeRequest& request,
   }
 
   const auto proposal_mode = model_->options_.sampled_mtp_proposal_mode;
-  // Halo-compatible deterministic proposals do not need a private proposal RNG
-  // or a cloned target sampler. With draft confidence disabled they also need
-  // only the 4-byte MTP argmax, avoiding the Top-256 proposal transfer.
+  // Halo-compatible deterministic proposals do not use the sampled confidence
+  // cutoff. They need only the 4-byte MTP argmax, avoiding the Top-256 transfer.
   const bool halo_token_only = sampled &&
-      proposal_mode == SampledMtpProposalMode::kHaloGreedy &&
-      !(draft_confidence_ > 0.0F);
+      proposal_mode == SampledMtpProposalMode::kHaloGreedy;
   const bool need_candidates = sampled && !halo_token_only;
   const bool async_halo_chain =
       !defer_head && halo_token_only && width >= 2;
@@ -1041,13 +1082,13 @@ bool Session::PrepareDecode(const DecodeRequest& request,
         pending->draft = token;
         pending->proposals.push_back(DeterministicProposal(token));
         pending->chain.push_back(token);
-        ++stats_.mtp_confidence_samples;
-        stats_.mtp_confidence_sum += 1.0;
       }
     } else {
       while (pending->chain.size() < width && !pending->confidence_stopped) {
         AppendDraft(*pending);
-        if (sampled && !pending->proposals.empty()) {
+        if (sampled &&
+            pending->proposal_mode == SampledMtpProposalMode::kDistribution &&
+            !pending->proposals.empty()) {
           ++stats_.mtp_confidence_samples;
           stats_.mtp_confidence_sum += pending->proposals.back().confidence;
         }

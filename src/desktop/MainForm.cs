@@ -12,7 +12,9 @@ internal sealed class MainForm : Form
     private readonly ApiClient _api = new();
     private readonly NotifyIcon _tray = null!;
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 3000 };
-    private bool _reallyExit;
+    private bool _reallyExit, _shutdownComplete, _uiBusy, _refreshingHealth;
+    private readonly List<Control> _transitionControls = new();
+    private readonly List<ToolStripItem> _transitionMenuItems = new();
 
     private readonly Label _status = new() { AutoSize = true, Text = "Engine stopped" };
     private readonly Label _model = new() { AutoSize = true };
@@ -24,6 +26,8 @@ internal sealed class MainForm : Form
     private readonly RichTextBox _logs = new() { ReadOnly = true, Dock = DockStyle.Fill, BackColor = System.Drawing.Color.FromArgb(18,24,30), ForeColor = System.Drawing.Color.Gainsboro };
     private readonly RichTextBox _chatOutput = new() { ReadOnly = true, Dock = DockStyle.Fill };
     private readonly TextBox _chatPrompt = new() { Multiline = true, Dock = DockStyle.Fill, Text = "Write a short Python function that returns the nth Fibonacci number." };
+    private readonly TextBox _agentPrompt = new() { Multiline = true, AcceptsReturn = true, AcceptsTab = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, MaxLength = 1048576, Font = new System.Drawing.Font("Consolas", 11F) };
+    private readonly Label _agentPromptStatus = new() { AutoSize = true };
     private readonly RichTextBox _benchOutput = new() { ReadOnly = true, Dock = DockStyle.Fill };
     private readonly RichTextBox _lastRequest = new() { ReadOnly = true, Dock = DockStyle.Fill, Text = "No request yet." };
     private readonly Label _benchPrefill = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 16, System.Drawing.FontStyle.Bold) };
@@ -38,7 +42,7 @@ internal sealed class MainForm : Form
     private readonly Label _benchSync = new() { AutoSize = true, Font = new System.Drawing.Font("Segoe UI", 14, System.Drawing.FontStyle.Bold) };
 
     private TextBox _modelPath = null!, _mtpPath = null!, _mmprojPath = null!, _host = null!;
-    private NumericUpDown _port = null!, _context = null!, _draft = null!, _draftConfidence = null!, _prefillBatch = null!, _lookupMinNgram = null!, _lookupMaxNgram = null!, _lookupWindow = null!, _lookupMinDraft = null!, _memoryFloor = null!, _defaultTokens = null!, _temp = null!, _topP = null!, _topK = null!, _minP = null!, _repeatPenalty = null!, _frequencyPenalty = null!, _presencePenalty = null!, _repeatLastN = null!;
+    private NumericUpDown _port = null!, _context = null!, _draft = null!, _draftConfidence = null!, _prefillBatch = null!, _lookupMinNgram = null!, _lookupMaxNgram = null!, _lookupWindow = null!, _lookupMinDraft = null!, _memoryFloor = null!, _defaultTokens = null!, _temp = null!, _topP = null!, _topK = null!, _minP = null!, _repeatPenalty = null!, _frequencyPenalty = null!, _presencePenalty = null!, _repeatLastN = null!, _seed = null!;
     private Label _draftConfidenceLabel = null!, _lookupDescription = null!, _effectiveReasoning = null!;
     private CheckBox _contextLookup = null!, _memoryGuard = null!, _thinking = null!, _preserveThinking = null!, _autoEngine = null!, _startWindows = null!;
     private ComboBox _reasoning = null!, _mtpProposalMode = null!, _mtpVocabulary = null!, _lookupPolicy = null!;
@@ -59,18 +63,18 @@ internal sealed class MainForm : Form
         menu.Items.Add("Open Dashboard", null, (_, _) => ShowDashboard());
         menu.Items.Add("Open Browser Dashboard", null, (_, _) => OpenBrowser());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Start Engine", null, async (_, _) => await Safe(StartEngine));
-        menu.Items.Add("Restart Engine", null, async (_, _) => await Safe(RestartEngine));
-        menu.Items.Add("Stop Engine", null, async (_, _) => await Safe(StopEngine));
+        _transitionMenuItems.Add(menu.Items.Add("Start Engine", null, async (_, _) => await Safe(StartEngine)));
+        _transitionMenuItems.Add(menu.Items.Add("Restart Engine", null, async (_, _) => await Safe(RestartEngine)));
+        menu.Items.Add("Stop Engine", null, async (_, _) => await Safe(StopEngine, false));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, async (_, _) => { _reallyExit = true; await _engine.StopAsync(); _tray.Visible = false; Application.Exit(); });
+        menu.Items.Add("Exit", null, (_, _) => { _reallyExit = true; Close(); });
         var trayIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? System.Drawing.SystemIcons.Application;
         Icon = trayIcon;
         _tray = new NotifyIcon { Text = "FlashNextVelocity", Icon = trayIcon, ContextMenuStrip = menu, Visible = true };
         _tray.DoubleClick += (_, _) => ShowDashboard();
 
-        _engine.LogLine += line => BeginInvoke(new Action(() => AppendLog(line)));
-        _engine.StateChanged += () => BeginInvoke(new Action(UpdateStatusLabels));
+        _engine.LogLine += line => Post(() => AppendLog(line));
+        _engine.StateChanged += () => Post(UpdateStatusLabels);
         _statusTimer.Tick += async (_, _) => await RefreshHealth();
         _statusTimer.Start();
 
@@ -89,15 +93,17 @@ internal sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var top = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(10), WrapContents = false };
         var start = new Button { Text = "Start" }; start.Click += async (_, _) => await Safe(StartEngine);
-        var stop = new Button { Text = "Stop" }; stop.Click += async (_, _) => await Safe(StopEngine);
+        var stop = new Button { Text = "Stop" }; stop.Click += async (_, _) => await Safe(StopEngine, false);
         var restart = new Button { Text = "Restart" }; restart.Click += async (_, _) => await Safe(RestartEngine);
         var web = new Button { Text = "Browser Dashboard" }; web.Click += (_, _) => OpenBrowser();
+        _transitionControls.AddRange(new Control[] { start, restart });
         top.Controls.AddRange(new Control[] { _status, start, stop, restart, web });
         root.Controls.Add(top, 0, 0);
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
         tabs.TabPages.Add(BuildDashboardTab());
         tabs.TabPages.Add(BuildSettingsTab());
+        tabs.TabPages.Add(BuildAgentPromptTab());
         tabs.TabPages.Add(BuildBenchmarkTab());
         tabs.TabPages.Add(BuildLogsTab());
         root.Controls.Add(tabs, 0, 1);
@@ -125,8 +131,13 @@ internal sealed class MainForm : Form
             if (_engine.RequiresRestart(_cfg))
                 throw new InvalidOperationException("Saved settings are not applied to the running engine. Use Save + Restart Engine before sending.");
             _chatOutput.Text = "Working...";
-            _chatOutput.Text = await _api.ChatAsync(_cfg, _chatPrompt.Text, _cfg.DefaultMaxTokens);
+            var requested = _cfg.DefaultMaxTokens;
+            var progress = new Progress<string>(text => _chatOutput.Text = text);
+            var result = await _api.ChatStreamAsync(_cfg, _chatPrompt.Text, requested, progress);
+            _chatOutput.Text = result.Text;
+            AppendLog($"Quick Chat finished: reason={result.FinishReason ?? "unknown"}, completion_tokens={(result.CompletionTokens?.ToString() ?? "unknown")}, requested_max_tokens={result.RequestedMaxTokens}, effective_seed={(result.EffectiveSeed?.ToString() ?? "unreported")}");
         });
+        _transitionControls.Add(send);
         var clear = new Button { Text = "Clear" }; clear.Click += (_, _) => _chatOutput.Clear();
         buttons.Controls.AddRange(new Control[] { send, clear }); promptLayout.Controls.Add(buttons, 0, 1); promptGroup.Controls.Add(promptLayout);
         layout.Controls.Add(promptGroup, 0, 1);
@@ -137,12 +148,50 @@ internal sealed class MainForm : Form
         tab.Controls.Add(layout); return tab;
     }
 
+    private TabPage BuildAgentPromptTab()
+    {
+        var tab = new TabPage("Agent Prompt");
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(12) };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.Controls.Add(new Label {
+            AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 0, 10),
+            Text = "System instructions for coding, SVG, and other tasks. Applied explicitly by desktop and browser Studio. API clients choose their own instructions.\r\nSave + Apply affects new requests without restarting the model. Client instructions and tools are retained. Leave blank to disable this additional prompt."
+        }, 0, 0);
+        _agentPrompt.Text = _cfg.AgentPrompt;
+        layout.Controls.Add(_agentPrompt, 0, 1);
+        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0) };
+        var save = new Button { Text = "Save + Apply", AutoSize = true };
+        save.Click += (_, _) => SafeSync(SaveAgentPrompt);
+        _transitionControls.Add(save);
+        var reset = new Button { Text = "Restore Default", AutoSize = true };
+        reset.Click += (_, _) => { _agentPrompt.Text = AgentPromptDefaults.CodingAndSvg; _agentPromptStatus.Text = "Default restored in editor. Save + Apply to use it."; };
+        buttons.Controls.AddRange(new Control[] { save, reset, _agentPromptStatus });
+        layout.Controls.Add(buttons, 0, 2);
+        tab.Controls.Add(layout);
+        return tab;
+    }
+
+    private void SaveAgentPrompt()
+    {
+        // Save only the prompt, preserving any engine-setting edits still in
+        // the Settings tab and all other persisted configuration values.
+        var saved = EngineConfig.LoadFromDisk();
+        saved.AgentPrompt = _agentPrompt.Text;
+        saved.Save();
+        _cfg.AgentPrompt = saved.AgentPrompt;
+        _agentPromptStatus.Text = "Saved. New Studio requests use this prompt.";
+        AppendLog($"Agent prompt saved and applied to new requests ({saved.AgentPrompt.Length} characters).");
+    }
+
     private TabPage BuildSettingsTab()
     {
         var tab = new TabPage("Settings");
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        _transitionControls.Add(panel);
         var grid = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 3, Padding = new Padding(12) };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
         int r = 0;
         _modelPath = AddPath(grid, ref r, "First model shard", "Qwen3.8-Flash-Next...");
         _mtpPath = AddPath(grid, ref r, "MTP GGUF (empty = OFF)", "shared Q8_0 MTP");
@@ -181,7 +230,7 @@ internal sealed class MainForm : Form
             UpdateLookupControls();
         };
         _memoryGuard.CheckedChanged += (_, _) => _memoryFloor.Enabled = _memoryGuard.Checked;
-        _defaultTokens = AddNumber(grid, ref r, "Default max tokens", 1, 65536, 0);
+        _defaultTokens = AddNumber(grid, ref r, "Default max tokens", 1, 1048576, 0);
         _temp = AddNumber(grid, ref r, "Temperature", 0, 2, 2, .05m);
         _topP = AddNumber(grid, ref r, "Top P", .01m, 1, 2, .01m);
         _topK = AddNumber(grid, ref r, "Top K", 0, 1000, 0);
@@ -190,6 +239,7 @@ internal sealed class MainForm : Form
         _frequencyPenalty = AddNumber(grid, ref r, "Frequency penalty", -2, 2, 2, .01m);
         _presencePenalty = AddNumber(grid, ref r, "Presence penalty", -2, 2, 2, .01m);
         _repeatLastN = AddNumber(grid, ref r, "Repeat last N", 0, 65536, 0);
+        _seed = AddNumber(grid, ref r, "Sampling seed (-1 random)", -1, 9007199254740991m, 0);
         _thinking = AddCheck(grid, ref r, "Thinking enabled");
         _preserveThinking = AddCheck(grid, ref r, "Preserve thinking");
         var reasoningLabel = new Label { Text = "Reasoning effort", AutoSize = true, Anchor = AnchorStyles.Left };
@@ -210,6 +260,15 @@ internal sealed class MainForm : Form
         reasoningLabel.Enabled = _thinking.Checked;
         _reasoning.Enabled = _thinking.Checked;
         _preserveThinking.Enabled = _thinking.Checked;
+        var presets = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+        foreach (var preset in new[] { "Thinking - Medium", "Thinking - Xhigh", "Non-thinking" })
+        {
+            var button = new Button { Text = "Apply " + preset, AutoSize = true };
+            button.Click += (_, _) => ApplyQualityPreset(preset);
+            presets.Controls.Add(button);
+        }
+        grid.Controls.Add(new Label { Text = "Quality presets (opt-in)", AutoSize = true }, 0, r);
+        grid.Controls.Add(presets, 1, r++);
         grid.Controls.Add(new Label { Text = "Active config", AutoSize = true, Anchor = AnchorStyles.Left }, 0, r);
         var configPath = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, Text = AppPaths.Config };
         var openConfig = new Button { Text = "Open Config" };
@@ -233,8 +292,9 @@ internal sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 46)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 54));
         var controls = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
         controls.Controls.Add(new Label { Text = "Completion tokens", AutoSize = true, Padding = new Padding(0,8,0,0) });
-        var tokens = new NumericUpDown { Minimum = 64, Maximum = 4096, Value = 512, Width = 100 };
+        var tokens = new NumericUpDown { Minimum = 1, Maximum = 1048576, Value = 512, Width = 120, ThousandsSeparator = true };
         var run = new Button { Text = "Run Benchmark" };
+        _transitionControls.Add(run);
         controls.Controls.Add(tokens); controls.Controls.Add(run); layout.Controls.Add(controls, 0, 0);
         var metrics = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0,10,0,10) };
         metrics.Controls.AddRange(new Control[] {
@@ -252,20 +312,23 @@ internal sealed class MainForm : Form
         {
             _benchOutput.Text = "Saving/applying settings...";
             SaveSettings();
-            if (_engine.RequiresRestart(_cfg))
+            var benchmarkConfig = _cfg.Clone();
+            var benchmarkUi = JsonSerializer.Deserialize<UiSettings>(JsonSerializer.Serialize(_ui, JsonUtil.Options), JsonUtil.Options);
+            var benchmarkTokens = (int)tokens.Value;
+            if (_engine.RequiresRestart(benchmarkConfig))
             {
                 AppendLog("Benchmark settings differ from the running engine; restarting once so the benchmark uses the saved config.");
-                await _engine.RestartAsync(_cfg);
+                await _engine.RestartAsync(benchmarkConfig);
                 await RefreshHealth();
             }
             _benchOutput.Text = "Running warmup and benchmark...";
-            var result = await _api.BenchmarkAsync(_cfg, (int)tokens.Value);
-            _benchPrefill.Text = $"{result.PrefillTps:N2} tok/s"; _benchDecode.Text = $"{result.DecodeTps:N2} tok/s"; _benchMtp.Text = $"{result.Acceptance * 100:N1}%"; _benchLookup.Text = result.LookupDrafted > 0 ? $"{result.LookupAcceptance * 100:N1}%" : "n/a";
+            var result = await _api.BenchmarkAsync(benchmarkConfig, benchmarkTokens, benchmarkUi);
+            _benchPrefill.Text = $"{result.PrefillTps:N2} tok/s"; _benchDecode.Text = $"median {result.DecodeTps:N2} · min {result.MinDecodeTps:N2} · max {result.MaxDecodeTps:N2} tok/s"; _benchMtp.Text = $"{result.Acceptance * 100:N1}%"; _benchLookup.Text = result.LookupDrafted > 0 ? $"{result.LookupAcceptance * 100:N1}%" : "n/a";
             _benchTtft.Text = $"{result.TtftMs:N0} ms"; _benchDepth.Text = $"{result.AvgDraftDepth:N2}"; _benchQsa.Text = $"{result.QsaPct:N1}%";
             _benchPle.Text = $"{result.PleWaitMs:N1} ms"; _benchBlas.Text = $"{result.FallbackPct:N1}%"; _benchSync.Text = $"{result.SyncPerToken:N2} ms";
-            _benchOutput.Text = string.IsNullOrWhiteSpace(result.Report)
+            _benchOutput.Text = $"Seed: {result.Seed}\r\nMeasured decode tok/s: {string.Join(", ", result.MeasuredDecodeTps.Select(x => x.ToString("N2")))}\r\nCompletion hashes identical: {result.CompletionsIdentical}\r\nEffective settings identical: {result.EffectiveSettingsIdentical}\r\n" + (string.IsNullOrWhiteSpace(result.Report)
                 ? $"MTP accepted: {result.Accepted}/{result.Drafted}\r\nLookup accepted: {result.LookupAccepted}/{result.LookupDrafted}\r\n64-token windows: {string.Join(", ", result.Windows.Select(x => x.ToString("N2")))}"
-                : result.Report.Replace("\n", "\r\n");
+                : result.Report.Replace("\n", "\r\n"));
             Directory.CreateDirectory(AppPaths.Benchmarks); File.WriteAllText(Path.Combine(AppPaths.Benchmarks, $"benchmark-{DateTime.Now:yyyyMMdd-HHmmss}.json"), result.RawJson);
         });
         tab.Controls.Add(layout); return tab;
@@ -314,7 +377,7 @@ internal sealed class MainForm : Form
         UpdateLookupControls();
         _lookupMinNgram.Enabled = _cfg.ContextLookup; _lookupMaxNgram.Enabled = _cfg.ContextLookup; _lookupWindow.Enabled = _cfg.ContextLookup; _lookupMinDraft.Enabled = _cfg.ContextLookup;
         _memoryGuard.Checked = _cfg.MemoryGuard; Set(_memoryFloor, (decimal)_cfg.MemoryGuardMinAvailableGiB); _memoryFloor.Enabled = _cfg.MemoryGuard; Set(_defaultTokens, _cfg.DefaultMaxTokens);
-        Set(_temp, (decimal)_cfg.Sampling.Temperature); Set(_topP, (decimal)_cfg.Sampling.TopP); Set(_topK, _cfg.Sampling.TopK); Set(_minP, (decimal)_cfg.Sampling.MinP); Set(_repeatPenalty, (decimal)_cfg.Sampling.RepeatPenalty); Set(_repeatLastN, _cfg.Sampling.RepeatLastN);
+        Set(_temp, (decimal)_cfg.Sampling.Temperature); Set(_topP, (decimal)_cfg.Sampling.TopP); Set(_topK, _cfg.Sampling.TopK); Set(_minP, (decimal)_cfg.Sampling.MinP); Set(_repeatPenalty, (decimal)_cfg.Sampling.RepeatPenalty); Set(_repeatLastN, _cfg.Sampling.RepeatLastN); Set(_seed, _cfg.Sampling.Seed);
         Set(_frequencyPenalty, (decimal)_cfg.Sampling.FrequencyPenalty); Set(_presencePenalty, (decimal)_cfg.Sampling.PresencePenalty);
         _thinking.Checked = _cfg.Thinking;
         _preserveThinking.Checked = _cfg.PreserveThinking;
@@ -339,6 +402,24 @@ internal sealed class MainForm : Form
         grid.Controls.Add(new Label { Text = label, AutoSize = true }, 0, row);
         var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
         combo.Items.AddRange(choices); grid.Controls.Add(combo, 1, row++); return combo;
+    }
+
+    internal void ApplyQualityPreset(string preset)
+    {
+        if (_engine.IsBusy || _reallyExit) return;
+        var thinking = preset switch
+        {
+            "Thinking - Medium" or "Thinking - Xhigh" => true,
+            "Non-thinking" => false,
+            _ => throw new ArgumentException("Unknown quality preset", nameof(preset))
+        };
+        Set(_temp, thinking ? 1m : .7m); Set(_topP, thinking ? .95m : .8m);
+        Set(_topK, 20); Set(_minP, 0); Set(_repeatPenalty, 1);
+        Set(_frequencyPenalty, 0); Set(_presencePenalty, thinking ? 0 : 1.5m);
+        _thinking.Checked = thinking; _preserveThinking.Checked = thinking;
+        if (thinking) _reasoning.SelectedItem = preset == "Thinking - Xhigh" ? "xhigh" : "medium";
+        UpdateReasoningDisplay();
+        AppendLog("Preset applied to controls: " + preset + ". Save + Restart to use it.");
     }
 
     private void UpdateReasoningDisplay() => _effectiveReasoning.Text =
@@ -393,15 +474,18 @@ internal sealed class MainForm : Form
         _cfg.Sampling.FrequencyPenalty = (double)_frequencyPenalty.Value;
         _cfg.Sampling.PresencePenalty = (double)_presencePenalty.Value;
         _cfg.Sampling.RepeatLastN = (int)_repeatLastN.Value;
+        _cfg.Sampling.Seed = (long)_seed.Value;
         _cfg.Thinking = _thinking.Checked;
         _cfg.PreserveThinking = _preserveThinking.Checked;
         _cfg.ReasoningEffort = _reasoning.SelectedItem?.ToString() ?? "medium";
+        _cfg.AgentPrompt = _agentPrompt.Text;
 
         return _cfg.Clone();
     }
 
     private void SaveSettings()
     {
+        if (_engine.IsBusy || _reallyExit) throw new InvalidOperationException("Wait for the engine transition before saving settings.");
         _cfg = CaptureSettings();
         // Save atomically, then read the exact live dist\config.json back. If a
         // field failed to persist, do not continue with a misleading in-memory
@@ -441,10 +525,15 @@ internal sealed class MainForm : Form
 
     private async Task RefreshHealth()
     {
-        if (!_engine.IsRunning) { UpdateStatusLabels(); return; }
+        if (_refreshingHealth) return;
+        if (_engine.State != EngineManager.LifecycleState.Running) { UpdateStatusLabels(); return; }
+        _refreshingHealth = true;
+        var generation = _engine.Generation;
+        var applied = _engine.AppliedConfig ?? _cfg.Clone();
         try
         {
-            var h = await _api.HealthAsync(_cfg);
+            var h = await _api.HealthAsync(applied);
+            if (generation != _engine.Generation || _engine.State != EngineManager.LifecycleState.Running || _reallyExit) return;
             _status.Text = $"Online  PID {_engine.ProcessId}  loaded {h.LoadSeconds:N1}s"; _status.ForeColor = System.Drawing.Color.ForestGreen;
             var confidence = string.Equals(h.MtpProposalMode, "halo_greedy", StringComparison.OrdinalIgnoreCase)
                 ? "confidence n/a (sampled only)"
@@ -453,16 +542,29 @@ internal sealed class MainForm : Form
                 ? $"Sticky: start {h.LookupStart} -> promote {h.LookupMaximum}; capacity {h.LookupCapacity}; reset each request."
                 : $"{h.LookupPolicy}: width {h.LookupStart}; capacity {h.LookupCapacity}.";
             _tuningStatus.Text = h.Tuning;
-            _model.Text = h.Model; _mtp.Text = h.Mtp ? $"ON · {h.MtpDraftVocabulary} · {h.MtpProposalMode} · max {h.DraftMax} · {confidence} · lookup {(h.ContextLookup ? "ON" : "OFF")}" : "OFF"; _vision.Text = h.Vision ? "ON" : "OFF"; _apiUrl.Text = _cfg.BaseUrl + "/v1";
-            try { _lastRequest.Text = (await _api.LastRequestAsync(_cfg)).Replace("\n", "\r\n"); } catch { }
+            _model.Text = h.Model; _mtp.Text = h.Mtp ? $"ON · {h.MtpDraftVocabulary} · {h.MtpProposalMode} · max {h.DraftMax} · {confidence} · lookup {(h.ContextLookup ? "ON" : "OFF")}" : "OFF"; _vision.Text = h.Vision ? "ON" : "OFF"; _apiUrl.Text = applied.BaseUrl + "/v1";
+            try
+            {
+                var report = await _api.LastRequestAsync(applied);
+                if (generation != _engine.Generation || _engine.State != EngineManager.LifecycleState.Running || _reallyExit) return;
+                _lastRequest.Text = (report + SettingsSnapshot.FormatCurrentPreferences(_ui)).Replace("\n", "\r\n");
+            }
+            catch { }
             _tray.Text = $"FlashNextVelocity - online - {(h.Mtp ? "MTP" : "no MTP")} - {(h.Vision ? "vision" : "text")}";
         }
         catch { UpdateStatusLabels(); }
+        finally { _refreshingHealth = false; }
     }
 
     private void UpdateStatusLabels()
     {
-        if (!_engine.IsRunning) { _status.Text = "Engine stopped"; _status.ForeColor = System.Drawing.Color.Firebrick; _tray.Text = "FlashNextVelocity - stopped"; }
+        UpdateBusyControls();
+        if (_engine.State != EngineManager.LifecycleState.Running)
+        {
+            _status.Text = "Engine " + _engine.State.ToString().ToLowerInvariant();
+            _status.ForeColor = _engine.State == EngineManager.LifecycleState.Failed ? System.Drawing.Color.Firebrick : System.Drawing.Color.DarkOrange;
+            _tray.Text = "FlashNextVelocity - " + _engine.State.ToString().ToLowerInvariant();
+        }
         _apiUrl.Text = _cfg.BaseUrl + "/v1"; if (string.IsNullOrWhiteSpace(_model.Text)) _model.Text = Path.GetFileName(_cfg.Model); if (string.IsNullOrWhiteSpace(_mtp.Text)) _mtp.Text = File.Exists(_cfg.Mtp) ? "configured" : "OFF"; if (string.IsNullOrWhiteSpace(_vision.Text)) _vision.Text = File.Exists(_cfg.Mmproj) ? "configured" : "OFF";
     }
 
@@ -472,12 +574,54 @@ internal sealed class MainForm : Form
     }
     private void ShowDashboard() { Show(); WindowState = FormWindowState.Normal; Activate(); }
     private void AppendLog(string line) { _logs.AppendText($"[{DateTime.Now:HH:mm:ss}] {line}\r\n"); _logs.SelectionStart = _logs.TextLength; _logs.ScrollToCaret(); }
-    private async Task Safe(Func<Task> action) { try { await action(); } catch (Exception e) { AppendLog("ERROR: " + e.Message); MessageBox.Show(this, e.Message, "FlashNextVelocity", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
+    private void Post(Action action)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(new Action(() => { if (!IsDisposed) action(); })); }
+        catch (InvalidOperationException) { }
+    }
+
+    private void UpdateBusyControls()
+    {
+        var enabled = !_uiBusy && !_engine.IsBusy && !_reallyExit;
+        foreach (var control in _transitionControls) control.Enabled = enabled;
+        foreach (var item in _transitionMenuItems) item.Enabled = enabled;
+    }
+
+    private async Task Safe(Func<Task> action, bool exclusive = true)
+    {
+        if (exclusive && (_uiBusy || _engine.IsBusy || _reallyExit)) return;
+        if (exclusive) { _uiBusy = true; UpdateBusyControls(); }
+        try { await action(); }
+        catch (OperationCanceledException) { AppendLog("Engine initialization canceled."); }
+        catch (Exception e)
+        {
+            AppendLog("ERROR: " + e.Message);
+            if (!_reallyExit && !IsDisposed) MessageBox.Show(this, e.Message, "FlashNextVelocity", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { if (exclusive) _uiBusy = false; if (!IsDisposed) UpdateBusyControls(); }
+    }
     private void SafeSync(Action action) { try { action(); } catch (Exception e) { AppendLog("ERROR: " + e.Message); MessageBox.Show(this, e.Message, "FlashNextVelocity", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
 
-    private void OnClosing(object? sender, FormClosingEventArgs e)
+    private async void OnClosing(object? sender, FormClosingEventArgs e)
     {
+        if (_shutdownComplete) return;
         if (!_reallyExit && _ui.MinimizeToTray && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); return; }
-        _tray.Visible = false; _statusTimer.Stop(); _engine.Dispose(); _api.Dispose();
+        e.Cancel = true;
+        if (_reallyExit && _statusTimer.Enabled == false) return;
+        _reallyExit = true; _statusTimer.Stop(); UpdateBusyControls();
+        try
+        {
+            await _engine.StopAsync();
+            _engine.Dispose(); _api.Dispose(); _tray.Visible = false; _tray.Dispose();
+            _shutdownComplete = true;
+            Close();
+        }
+        catch (Exception error)
+        {
+            _reallyExit = false; _statusTimer.Start(); UpdateBusyControls();
+            AppendLog("Shutdown failed: " + error.Message);
+            MessageBox.Show(this, error.Message, "Engine shutdown failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 }
