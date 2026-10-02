@@ -96,6 +96,8 @@ The native recurrent session restarts whenever the prompt diverges from its stor
 
 Continuation uses `/v1/completions`: a short generated prefix is appended to the exact raw input, then continued. The same input is replayed after that generation as a fresh control. Re-tokenization and EOS can prevent reuse. The engine does not expose cached-token counts, so the report labels this as a **continuation attempt** and does not invent a cached-token count or cached prefill tps. This condition uses buffered completion responses; client first-response/gap metrics are unavailable for it.
 
+The continuation fixture now includes Qwen's non-thinking chat framing explicitly, because the raw completion endpoint does not add it. The original unframed prime returned an immediate EOS with zero output tokens; its zero decode rate was valid, and continuation had not started. Failed measurements now retain response text, finish reason, token counts, and metrics; immediate EOS is labeled as unmeasurable throughput. Historical partial reports are preserved and are not retroactively completed by this fix.
+
 ### Timing and correctness
 
 - Engine decode tps divides final generated tokens by engine decode wall time.

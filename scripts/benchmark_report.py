@@ -831,6 +831,15 @@ class Suite:
                 result = collect_stream(engine.base + '/v1/chat/completions', body, self.budget, self.args.request_timeout)
             usage = result.pop('usage')
             metrics = public_metrics(usage['flashnext_velocity'])
+            # Retain the response even when a measurement cannot be used. An
+            # immediate EOS is a valid completion, but has no throughput sample.
+            record.update(result, prompt_tokens=usage['prompt_tokens'],
+                completion_tokens=usage['completion_tokens'], metrics=metrics,
+                decode_tps=metrics.get('completion_tokens_per_second'),
+                decode_ms=metrics.get('decode_ms'), prefill_ms=metrics.get('prefill_ms'),
+                output_sha256=sha_text(result['text']))
+            if usage['completion_tokens'] == 0 and result['finish_reason'] == 'stop':
+                raise RuntimeError('Model stopped immediately (EOS): zero output tokens; throughput is not measurable.')
             if not math.isfinite(metrics['completion_tokens_per_second']) or metrics['completion_tokens_per_second'] <= 0:
                 raise RuntimeError('Engine returned an invalid decode rate.')
             effective = metrics.get('effective_request_settings', {})
@@ -909,14 +918,22 @@ class Suite:
     def continuation(self, engine, case, repetition):
         # Raw generated text is the only available API representation of the
         # session prefix. EOS and BPE boundary changes remain explicit limitations.
-        prefix = ('Reference conversation about a local inference runtime:\n' + self.corpus[:16000] +
-                  '\nContinue with a technical explanation of the runtime: ')
+        user = ('Reference conversation about a local inference runtime:\n' + self.corpus[:16000] +
+                '\nContinue with a technical explanation of the runtime: ')
+        # /v1/completions tokenizes raw text; it does not add the chat template.
+        # Match QwenChatTemplate::GenerationPrompt(false), then extend that same
+        # raw assistant prefix so Sync can reuse committed tokens.
+        prefix = ('<|im_start|>system\n' + self.fixtures['system'] + '<|im_end|>\n'
+                  '<|im_start|>user\n' + user + '<|im_end|>\n'
+                  '<|im_start|>assistant\n<think>\n\n</think>\n\n')
         prime_body = {'model': 'local', 'prompt': prefix, **self.sampling,
                       'max_tokens': 32, 'seed': SEEDS[repetition - 1], 'flashnext_profile': False}
+        snapshot = {'repetition': repetition, 'prime': prime_body}
+        self.inputs['conversation_requests'].append(snapshot)
         primed = self.execute(engine, case, repetition, 'setup', prime_body, 'fresh', True)
         prompt = prefix + primed['text']
         body = {**prime_body, 'prompt': prompt, 'max_tokens': 256}
-        self.inputs['conversation_requests'].append({'repetition': repetition, 'prime': prime_body, 'measured': body})
+        snapshot['measured'] = body
         warm = self.execute(engine, case, repetition, body=body, cache='continuation-attempt', completion=True)
         warm['continuation_note'] = 'EOS/BPE can prevent prefix reuse' if primed.get('finish_reason') != 'length' else 'Raw prefix extended; cached-token count unavailable'
         # After generation, replaying this shorter prompt diverges from the

@@ -6,8 +6,9 @@ from pathlib import Path
 import tempfile
 import subprocess
 import sys
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('benchmark_report', ROOT / 'scripts/benchmark_report.py')
@@ -89,6 +90,48 @@ class BenchmarkTests(unittest.TestCase):
         summary = bench.summarize_case(case, rows)
         self.assertEqual(summary['completed'], 1)
         self.assertEqual(summary['decode_tps'], 30)
+
+    def test_immediate_eos_retains_response_and_explains_missing_measurement(self):
+        suite = object.__new__(bench.Suite)
+        suite.budget = bench.Budget(1)
+        suite.args = SimpleNamespace(request_timeout=10)
+        suite.data = {'runs': []}
+        suite.sampling = {}
+        suite.save = Mock()
+        engine = SimpleNamespace(base='http://localhost', mode='mtp_lookup')
+        case = {'id': 'conversation', 'mode': 'mtp_lookup', 'cache': 'fresh'}
+        response = {'choices': [{'text': '', 'finish_reason': 'stop'}],
+                    'usage': {'prompt_tokens': 20, 'completion_tokens': 0,
+                              'flashnext_velocity': {'completion_tokens_per_second': 0,
+                                                    'decode_ms': 0.5, 'prefill_ms': 10}}}
+        with patch.object(bench, 'request_json', return_value=response):
+            with self.assertRaisesRegex(RuntimeError, 'stopped immediately'):
+                suite.execute(engine, case, 1, 'setup', {'seed': 12345}, completion=True)
+        record = suite.data['runs'][0]
+        self.assertEqual(record['completion_tokens'], 0)
+        self.assertEqual(record['finish_reason'], 'stop')
+        self.assertEqual(record['metrics']['decode_ms'], 0.5)
+        self.assertEqual(record['text'], '')
+        suite.save.assert_called_once()
+
+    def test_continuation_frames_and_saves_prime_before_request(self):
+        suite = object.__new__(bench.Suite)
+        suite.corpus = 'reference'
+        suite.fixtures = {'system': 'Follow instructions.'}
+        suite.sampling = {}
+        suite.inputs = {'conversation_requests': []}
+        calls = []
+        def execute(*args, **kwargs):
+            self.assertEqual(len(suite.inputs['conversation_requests']), 1)
+            body = args[4] if len(args) > 4 else kwargs['body']
+            calls.append(body)
+            return {'text': 'continued text', 'finish_reason': 'length'}
+        suite.execute = execute
+        suite.continuation(None, {}, 1)
+        self.assertTrue(calls[0]['prompt'].startswith('<|im_start|>system\n'))
+        self.assertTrue(calls[0]['prompt'].endswith('<|im_start|>assistant\n<think>\n\n</think>\n\n'))
+        self.assertEqual(calls[1]['prompt'], calls[0]['prompt'] + 'continued text')
+        self.assertEqual(calls[1], calls[2])
 
     def test_edit_accepts_integer_sum_with_optional_conversion_and_preserves_other_code(self):
         direct = FIXTURES['code_edit_expected']

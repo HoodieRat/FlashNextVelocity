@@ -51,6 +51,7 @@ extern "C" unsigned long long qfn_q8_shallow_launches(void);
 #include "src/models/qwen/vision/prompt.hpp"
 #include "src/models/qwen38_flash_next/engine.hpp"
 #include "bench_profile.hpp"
+#include "generation_profile_guard.hpp"
 
 namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
@@ -1630,22 +1631,8 @@ class Runtime {
                   bool stream = false,
                   LookupMode lookup_mode = LookupMode::kSticky,
                   const std::function<bool()>& cancelled = {}) {
-    struct ProfileGuard {
-      bool on{false};
-      explicit ProfileGuard(bool enable) : on(enable) {
-        if (!on) return;
-        fnvprof::Reset();
-        qfn_q8_shallow_reset();
-        fnvprof::SetEnabled(true);
-        fnvprof::SetPhase(fnvprof::Phase::Prefill);
-      }
-      ~ProfileGuard() {
-        if (!on) return;
-        fnvprof::SetPhase(fnvprof::Phase::Off);
-        fnvprof::SetEnabled(false);
-      }
-    } profile_guard(profile);
-    std::lock_guard generation_lock(generation_mutex_);
+    fnvprof::GenerationProfileGuard profile_guard(
+        generation_mutex_, profile, qfn_q8_shallow_reset);
     CheckMemoryFloor("request start");
     if (!session_->IsValid()) {
       std::string error;

@@ -125,6 +125,15 @@ target_compile_options(FlashNextVelocityUnitTests PRIVATE -O2)
 set_target_properties(FlashNextVelocityUnitTests PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+add_executable(FlashNextProfileOwnershipTest tests/profile_ownership_test.cpp)
+target_include_directories(FlashNextProfileOwnershipTest PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
+target_compile_definitions(FlashNextProfileOwnershipTest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(FlashNextProfileOwnershipTest PRIVATE -O2)
+target_link_libraries(FlashNextProfileOwnershipTest PRIVATE Threads::Threads)
+set_target_properties(FlashNextProfileOwnershipTest PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 add_executable(FlashNextNgramDirectReadTest tests/ngram_direct_read_test.cpp)
 target_include_directories(FlashNextNgramDirectReadTest PRIVATE
   ${GUFO_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/src/native)
