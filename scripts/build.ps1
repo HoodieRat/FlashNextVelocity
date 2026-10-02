@@ -353,6 +353,7 @@ $VcpkgBin=Join-Path $Vcpkg 'installed\x64-windows\bin';if(Test-Path $VcpkgBin){C
 # Windows loads normally linked DLLs before main(). Put the selected ROCm runtime DLLs beside the engine EXE so startup does not depend on ambient PATH ordering.
 $RocmBin=Join-Path $Rocm 'bin';$RocmDlls=@();if(Test-Path $RocmBin){$RocmDlls=@(Get-ChildItem $RocmBin -File -Filter '*.dll' -EA SilentlyContinue);if($RocmDlls.Count -gt 0){$RocmDlls|Copy-Item -Destination (Join-Path $Dist 'engine') -Force;Write-Host "Bundled $($RocmDlls.Count) ROCm runtime DLL(s) beside the engine." -ForegroundColor Cyan}}
 if($RocmDlls.Count -eq 0){Write-Warning "No ROCm DLLs were found under $RocmBin. The runtime will fall back to PATH lookup."}
+& (Join-Path $PSScriptRoot 'copy-third-party-notices.ps1') -DestinationRoot $Dist -RocmRoot $Rocm -VcpkgShare (Join-Path $Vcpkg 'installed\x64-windows\share')
 [IO.File]::WriteAllText((Join-Path $Dist 'project-root.txt'),$Root,[Text.UTF8Encoding]::new($false))
 $DeviceLibPath='';if($bitcode){$DeviceLibPath=$bitcode.Directory.FullName};$RocblasLibPath='';if($rb){$RocblasLibPath=$rb.FullName};$HipblasltLibPath='';if($hb){$HipblasltLibPath=$hb.FullName};$runtime=[ordered]@{RocmPath=$Rocm;DeviceLibPath=$DeviceLibPath;RocblasTensileLibPath=$RocblasLibPath;HipblasltTensileLibPath=$HipblasltLibPath;VcpkgBin=$VcpkgBin};$runtimeJson=$runtime|ConvertTo-Json;[IO.File]::WriteAllText((Join-Path $Dist 'runtime.json'),$runtimeJson,[Text.UTF8Encoding]::new($false))
 

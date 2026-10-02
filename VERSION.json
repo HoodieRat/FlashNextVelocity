@@ -1,7 +1,8 @@
 {
   "name": "FlashNextVelocity Studio",
   "version": "1.0.10",
-  "gufo_commit": "9cad13974cf6da0cd3674b4e0a88b14b7e4a2908",
+  "gufo_commit": "cff564964e8506c0abb3e530cecb55332187ac6c",
+  "gufo_source": "https://github.com/pixmaate/gufo",
   "target": "Windows 11 x64 / AMD gfx1151",
   "notes": "Async halo-greedy confidence-0 MTP feedback chain with one chain-end synchronization, GPU-retained compact-verification frontier with lazy full-row D2H fallback, and device-only rollback without a host synchronization; retains v1.0.9 per-HC-stream MTP normalization and v1.0.8 adaptive exact Top-64/128/256 verification."
 }

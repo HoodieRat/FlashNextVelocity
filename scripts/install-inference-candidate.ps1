@@ -28,4 +28,9 @@ try {
   throw
 }
 @{installed=(Get-Date).ToString('o');backup=$backup;files=$manifest;preserved_settings=$before} | ConvertTo-Json -Depth 10 | Set-Content "$backup\installation.json" -Encoding utf8NoBOM
+if (Test-Path -LiteralPath (Join-Path $Stage 'third-party')) {
+  Copy-Item -LiteralPath (Join-Path $Stage 'third-party') -Destination $Dist -Recurse -Force
+} else {
+  & (Join-Path $PSScriptRoot 'copy-third-party-notices.ps1') -DestinationRoot $Dist
+}
 Write-Output "Installed and hash-verified. Rollback binaries: $backup"

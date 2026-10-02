@@ -37,5 +37,6 @@ foreach ($name in @('config.json', 'ui.json', 'runtime.json', 'project-root.txt'
     Copy-Item -LiteralPath (Join-Path $Root "dist\$name") -Destination (Join-Path $Stage $name) -Force
 }
 $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Join-Path $Stage 'engine\FlashNextVelocity.Engine.exe')))
+& (Join-Path $PSScriptRoot 'copy-third-party-notices.ps1') -DestinationRoot $Stage -RocmRoot $runtime.RocmPath -VcpkgShare ([IO.Path]::GetFullPath((Join-Path $runtime.VcpkgBin '..\share')))
 if (-not $binary.Contains('fnv-mtp-cache-replay-v13')) { throw 'Candidate contains a stale native engine.' }
 Write-Output "Candidate ready: $Stage"

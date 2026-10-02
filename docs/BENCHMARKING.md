@@ -18,14 +18,15 @@ Afterward, start your normal engine through Studio when needed.
 
 | File | Purpose |
 | --- | --- |
-| `BENCHMARK-REPORT.md` | Latest GitHub-ready report at the repository root |
+| `README.md` | Primary GitHub results, charts and expandable full report on the landing page |
+| `BENCHMARK-REPORT.md` | Standalone Markdown export of the latest report |
 | `benchmark-reports/<UTC timestamp>/README.md` | Self-contained report for that run |
 | `workloads.svg`, `context.svg` | Relative image links that render on GitHub |
 | `raw-results.json` | All requests, outputs, effective settings, metrics, identities, and errors |
 | `requests.csv` | One row per measured, warmup, or setup request |
 | `inputs.json` | Exact prompt snapshots for replay on another setup |
 
-Commit the root report **and its corresponding run folder** so the relative links work. Alternatively, publish just the self-contained run folder. Generated reports are outside the ignored `benchmarks/` directory.
+Commit the updated `README.md`, standalone export **and corresponding run folder** so the relative links work. The landing page keeps benchmarks inline; no separate page is required to read them. Generated reports are outside the ignored `benchmarks/` directory. The focused sticky-lookup qualification is retained separately in the README and is not overwritten by the full-suite publisher.
 
 ## Suite and request count
 
@@ -71,7 +72,7 @@ BENCHMARK-REPORT.bat --recheck-edits benchmark-reports\RUN\raw-results.json
 
 `--port` changes the private benchmark endpoint (default `18080`). `--request-timeout` and `--startup-timeout` default to 180 seconds. `--output` changes the archive directory. Python 3.10 or newer is required; the launcher prefers `py -3` and falls back to `python`.
 
-`--plan` replaces the root latest report with a clearly labeled plan; previous run folders are retained. Use `--render` to restore a previous run as the latest report.
+`--plan` replaces the standalone export with a clearly labeled plan; measured results in the main README and previous run folders are retained. A run with no successful measured requests also leaves the README results intact. Use `--render` to restore a previous run as the latest report, including the README's benchmark section.
 
 `--recheck-edits` writes a separate annotated `-rechecked` run folder and updates the root report. It preserves the original archive, outputs, settings, timings, and elapsed benchmark duration. The raw results record every previous/new check and the source file hash. Rechecking refuses a different saved edit prompt. It does not fill unmeasured conditions or load the engine.
 

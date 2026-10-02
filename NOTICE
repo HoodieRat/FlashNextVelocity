@@ -1,0 +1,18 @@
+FlashNextVelocity
+Copyright (c) 2026 FlashNextVelocity contributors
+
+FlashNextVelocity is a separate Windows application and inference project.
+It incorporates third-party software, including the Gufo Windows source
+base and quantized HIP kernels adapted from llama.cpp/ggml. Original
+copyright and license notices remain applicable to those contributions.
+
+See THIRD_PARTY.md for source URLs, the production source pin, component
+relationships and the location of retained license texts. The licenses/
+directory contains upstream notices and dependency notices. Build packages
+retain these in third-party/, together with notices from their selected
+ROCm SDK and vcpkg installation.
+
+This software is based in part on the work of the Independent JPEG Group.
+
+Model weights are not distributed by this repository; their publishers'
+licenses apply separately.

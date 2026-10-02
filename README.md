@@ -1,108 +1,460 @@
-# FlashNextVelocity Studio 1.0.9
+# FlashNextVelocity
 
-A Windows desktop/tray application and native `gfx1151` inference server for Qwen3.8-Flash-Next on AMD Strix Halo.
+A Windows desktop app and native ROCm HIP inference server for **Qwen3.8-Flash-Next on AMD Strix Halo**. This is the FlashNextVelocity project maintained by HoodieRat, with its own Windows integration, serving behavior and inference changes. Incorporated software and its authors are credited in [Credits and licensing](#credits-and-licensing).
 
-## Current Windows defaults and measured results
+## Benchmarks
 
-Fresh installs and Studio **Restore Default** use the measured 32k context profile: distribution MTP with the shared Q8_0 sidecar and Latin vocabulary, draft limit 7, confidence 0.75, prefill batch 4,096, and sticky context lookup. Lookup starts at 6 tokens and can promote to 16 within a request. Sampling is temperature 0.35, top-p 0.9, top-k 20, min-p 0, and repeat penalty 1. Existing settings are preserved across builds.
+<!-- FLASHNEXT_BENCHMARKS_START -->
 
-The [focused lookup comparison](LOOKUP-POLICY-REPORT.md) measured **16.3% faster file editing** and **10.0% faster log quotation** against fixed6, with identical copied outputs and all 18 measured checks passing. Prose throughput was essentially unchanged. These results apply to the published workloads; broad answer quality was not evaluated.
+### Text generation · 2026-10-02 (UTC)
 
-The [API benchmark report](BENCHMARK-REPORT.md) includes throughput, latency, context depth, task checks, and reproducibility artifacts. That run is partial: 43 completed checks passed, but the conversation condition failed. See the [benchmark guide](docs/BENCHMARKING.md) for commands and measurement limits.
+**PARTIAL** · 15/16 conditions · 43/49 measured requests · 43/43 basic checks passed · 15.4 minutes.
 
-This package is a **clean project**, not a hotfix overlay. It does not contain the old numbered repair BAT files.
+Median decode throughput in **tokens/second**. Each standard condition has 3 planned repetitions; natural early stops are retained.
 
-## What you get
+| Workload | Output tokens | Speculation off | MTP | MTP + lookup |
+| --- | --- | --- | --- | --- |
+| Prose | 256 | 25.7 | 36.3 | 36.4 |
+| Code generation | 256 | 26.9 | 55.8 | 53.9 |
+| Small code edit | 74 | 27.0 | 72.2 | 74.1 |
 
-- `FlashNextVelocity.exe`: Windows tray/dashboard application.
-- `FlashNextVelocity.Engine.exe`: native Gufo-derived HIP inference engine, managed by the desktop app.
-- OpenAI-compatible API at `http://127.0.0.1:8080/v1`.
-- Browser dashboard at `http://127.0.0.1:8080/` with quick chat and benchmark controls.
-- Desktop settings for model, MTP, native context lookup, Windows memory guard, vision, context, draft depth, sampling and server port.
-- Desktop benchmark page with prefill tok/s, decode tok/s, MTP-only acceptance, lookup acceptance, per-position survival/economics and 64-token decode windows.
-- Logs page and persistent engine logs.
-- System-tray Start / Stop / Restart / Open Dashboard controls.
-- Optional Start with Windows.
-- F16 or BF16 Qwen3.8 Flash-Next vision sidecar support.
-- Strict build-time runtime validation: health, API discovery, browser dashboard, text/code generation, real vision inference (when configured), and benchmark/metrics.
+![Decode throughput by workload](benchmark-reports/20261002-031837Z/workloads.svg)
 
-## Install/build
+### Long context
 
-Put the project at a short Windows path, preferably:
+| Actual input tokens | Decode tok/s | Prefill tok/s | Client time to first token (s) |
+| --- | --- | --- | --- |
+| 8,202 | 35.4 | 1,289.5 | 6.5 |
+| 32,517 | 35.0 | 1,132.9 | 28.9 |
+| 65,217 | 33.3 | 1,135.5 | 57.7 |
 
-`C:\FlashNextVelocity`
+![Decode throughput by occupied context](benchmark-reports/20261002-031837Z/context.svg)
 
-Then double-click:
+### Measurement context
 
-`BUILD.bat`
+- **Hardware:** AMD RYZEN AI MAX+ 395 w/ Radeon 8060S; 128.0 GiB RAM; Microsoft Windows 11 Pro.
+- **Model:** `Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf`; MTP `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`.
+- **Backend:** FlashNextVelocity / native ROCm HIP / gfx1151; context capacity 67,584 tokens.
+- **Method:** one client, grouped acceleration modes, profiling/thinking/vision off. Decode rates are engine telemetry; time to first token is measured by the client. Detailed ranges, output lengths, latency, configuration and fingerprints are below.
+- **Interpretation:** basic task checks are not a comprehensive coding-quality evaluation. Compare matching prompts, output lengths, sampling, context and model files.
 
-The build is project-local. It installs/builds the required native dependencies, pins the HIP host toolset to MSVC 14.44, uses the pinned Gufo commit, builds the native engine, builds the Windows tray app, creates `dist\`, then starts the real engine for runtime self-tests.
+**Unfinished conditions:**
 
-On the first v1.0.4 run/build, Studio can copy an existing ROCm gfx1151 SDK from the old project into its own `.deps\rocm`. After that, Studio no longer depends on `C:\flashfknworkalready` and that old folder may be deleted.
+- conversation could not finish: Engine returned an invalid decode rate.
 
-If `C:\flashfknworkalready\config.json` exists, it is migrated into the new app for the first build. Otherwise the desktop app searches `C:\FlashNextModels` for the model, shared Q8_0 MTP and mmproj on first launch.
+This remains a partial result; passing checks cover completed requests only.
 
-A build is considered successful only after the full runtime acceptance gate passes when a model is configured. The gate verifies the dashboard/API, real text generation, real vision inference with a CRC-valid PNG fixture, and benchmark metrics. Compilation alone is not treated as success.
+Reproduction data: [raw JSON](benchmark-reports/20261002-031837Z/raw-results.json), [request CSV](benchmark-reports/20261002-031837Z/requests.csv), [exact inputs](benchmark-reports/20261002-031837Z/inputs.json).
 
-Repeated builds reuse the already-prepared pinned Gufo tree unless the pinned commit or integrated Windows preparation script changes, avoiding unnecessary native recompilation.
+<details>
+<summary>Full benchmark report: methodology, latency, checks and reproducibility</summary>
 
-## Normal use
+> **PARTIAL** · 2026-10-02T03:18:37.435452+00:00 · Suite v1 · production sampling
 
-After a successful build, double-click:
+### 1. Executive Summary
 
-`RUN.bat`
+| Measure | Result |
+| --- | --- |
+| Completed conditions | 15/16 |
+| Measured requests | 43/49 successful |
+| Warmup / setup requests | 6 / 5 |
+| Elapsed time | 15.4 minutes |
+| Time limit | 45 minutes |
+| Basic correctness checks | 43/43 passed |
+| Profiling | Disabled for throughput measurements |
 
-From then on you normally use the tray icon or dashboard, not scripts.
+**Rates apply to the listed workloads and conditions. No single rate represents every task.**
 
-Closing the dashboard window minimizes it to the tray. Use the tray menu **Exit** to stop the native engine and leave the app.
+**Run notes:**
 
-## Dashboard
+- conversation could not finish: Engine returned an invalid decode rate.
 
-The desktop dashboard has five tabs:
+| Workload | Off tps | MTP tps | MTP + lookup tps | Full / off |
+| --- | --- | --- | --- | --- |
+| prose | 25.7 | 36.3 | 36.4 | 1.41x |
+| code generation | 26.9 | 55.8 | 53.9 | 2.01x |
+| code edit | 27.0 | 72.2 | 74.1 | 2.74x |
 
-- **Dashboard**: engine status, MTP/vision state, API URL and a real chat/code test.
-- **Settings**: model, MTP, mmproj, context, MTP draft max, host/port and sampling controls. `Save + Restart Engine` applies engine-level settings.
-- **Agent Prompt**: editable system instructions, prefilled with a coding and SVG design prompt. `Save + Apply` saves it for new Quick Chat, browser chat, and API requests that explicitly supply it without reloading the model. An empty prompt disables these additional instructions; client system instructions and tools are retained.
-- **Benchmark**: warmup plus measured inference, including prefill tok/s, decode tok/s, MTP acceptance and successive ~64-token decode windows.
-- **Logs**: live native stdout/stderr and access to persisted logs.
+Ratios describe observed throughput in this grouped run. Consult correctness results before treating them as completed-task gains.
 
-Benchmark reporting requirement: every Settings-page value must appear in the displayed benchmark report and saved JSON, including disabled settings, model paths, lookup parameters, memory guard, sampling, reasoning preferences, active config path, and Studio startup preferences. Studio captures this snapshot before running; request overrides and their effective values are reported separately. Lookup telemetry must identify `sticky`, `fixed6`, or `fixed16`, its starting/maximum/final widths, capacity, and whether/where promotion happened. Last Request includes the engine configuration captured for that request; local Studio preferences are labeled with their refresh time context.
+![Decode throughput by workload and acceleration](benchmark-reports/20261002-031837Z/workloads.svg)
 
-Quick Chat is a standalone chat: code and SVG requests return code in the response. It has no filesystem or shell tools. Coding clients such as OpenCode supply their own tools and execute the structured calls returned by the server.
+### 2. System and Software Configuration
 
-The Studio agent prompt is stored as `agent_prompt` in `dist/config.json`. Desktop and browser Studio explicitly send it with their requests. External chat API requests add no Studio prompt when `agent_prompt` is omitted, null, or empty. An explicit string is added once before client messages; other non-null types return HTTP 400. `/health` exposes the live saved prompt as `studio_agent_prompt` for browser Studio. Model and sampling settings still affect output quality.
+| Setting | Value |
+| --- | --- |
+| CPU | AMD RYZEN AI MAX+ 395 w/ Radeon 8060S           |
+| OS | Microsoft Windows 11 Pro |
+| OS build | 26200 |
+| Installed RAM | 128.0 GiB |
+| RAM configured speed | 8000 MT/s |
+| GPU / driver | Microsoft Remote Display Adapter / 10.0.26100.9278; AMD Radeon(TM) 8060S Graphics / 32.0.31041.1004 |
+| Power plan | Power Scheme GUID: e6bdbc32-f927-41a8-aff4-93df4fd4484c  (Ultimate Performance) |
+| Backend | FlashNextVelocity / ROCm HIP / gfx1151 |
+| Loaded HIP runtime file version | 10.0.3581.0 |
+| Engine runtime revision | fnv-mtp-cache-replay-v13 |
+| Git commit | b58deeb81e19b250222fe259d223339c8634543a |
+| Working tree | Contains local changes |
+| Context capacity | 67584 |
+| Preset | production |
+| Sampling | temperature=0.35, top_p=0.9, top_k=20, min_p=0, repeat_penalty=1, repeat_last_n=512, frequency_penalty=0, presence_penalty=0 |
+| Target model | Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf |
+| MTP sidecar | mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf |
 
-Studio launches the engine with an immutable configuration snapshot and the internal `--studio-config` argument pointing to the durable editable configuration. Prompt-only Save + Apply changes affect new Studio requests without reloading the model. Start/restart operations are serialized; Stop and Exit cancel initialization, and only the owned engine process is terminated. An occupied port produces a startup error.
+Full asset hashes, per-mode settings, fixture hashes, and request settings are in [raw-results.json](benchmark-reports/20261002-031837Z/raw-results.json).
 
-The Settings page provides opt-in **Apply Thinking - Medium**, **Apply Thinking - Xhigh**, and **Apply Non-thinking** presets using Qwen's recommended sampling values. These fill controls without saving or restarting and preserve context, MTP, lookup, memory guard, seed, repeat window, paths, and token limits. Use Save + Restart to apply them. Thinking presets preserve supplied reasoning history; external clients must retain and resend `reasoning_content` to benefit from that setting.
+### 3. Benchmark Methodology
 
-Runtime `fnv-mtp-cache-replay-v13` selectively backports Gufo's MTP cache/replay correction: residual validity, cache-only prefill, consistent persistent projections, and corrected snapshot state. Older snapshots are rejected. Grouped HC normalization, asynchronous halo chains, exact target verification, and Windows I/O remain in place.
+- One client; three sequential engine loads: speculation off, MTP only, MTP plus context lookup.
+- 3 repetitions per condition; one longer generation. Seed schedule: 12345, 23456, 34567.
+- Most outputs are capped at 256 tokens; compact JSON/tool tasks at 128; longer generation at 1,024. Natural early stops are retained and labeled.
+- Six planned warmups: one per mode and one per context depth. Calibration and continuation priming are setup requests, excluded from performance medians.
+- Fresh chat requests diverge from the preceding generated session. This native engine resets recurrent state on divergence. Conversation continuation uses the separate raw-completion API and has an explicitly matched fresh control.
+- Context inputs are snapshots of actual repository documents and code, not repeated single-token filler. The requested depths are approximate; actual token counts are reported.
+- Thinking, vision, and the private Studio agent prompt are disabled for this text suite. Context capacity is identical across modes and raised to at least 67,584 tokens for the 64k test.
+- Client first response timing starts before sending the request and ignores role, heartbeat, and usage events. Tool responses may be buffered until a complete call exists.
+- Engine decode tps = generated tokens / engine decode seconds. Client total time includes the HTTP request and streaming delivery. These are different measurement boundaries.
+- Streaming gaps are intervals between meaningful payload events, not exact per-token GPU latency. Draft IDs and hidden tokens are not counted as accepted output.
+- Reported prefill tps is used only for fresh prompts. Continuation reports prefill milliseconds because the engine does not expose the actual number of newly processed tokens.
+- Engine loading uses the existing OS file cache; these are not cold-disk load tests.
 
-The measured Windows distribution/Q8/Latin/C1 configuration uses a separate calibrated cost curve. Its model, sidecar layout, serving geometry, and compact verification lane are checked before selection; other configurations retain the incumbent curve. Health and request metrics identify the selected profile. Adaptive depth and the draft maximum of 7 are retained.
+Exact input snapshots: [inputs.json](benchmark-reports/20261002-031837Z/inputs.json). No generated tool or code is executed.
 
-The inference update can be staged with `scripts/build-inference-candidate.ps1` and installed with Studio closed using `scripts/install-inference-candidate.ps1`. Installation verifies binary hashes, preserves `config.json`, `ui.json`, and `runtime.json`, and retains the prior binaries under `build/inference-install-backup-*`.
+### 4. Performance Results
 
-Chat streams send text and reasoning as they are generated. Tool calls are sent only after the entire call has been parsed, with required arguments and declared basic types checked; interrupted calls never expose an empty placeholder to clients. Cancelling a client request releases the generation session. Text responses report `finish_reason: "length"` when the output budget runs out. A tool call cut off by the output budget returns an explicit error; streaming errors use the SSE error envelope.
+#### 4.1 Workloads and Acceleration
 
-For a real-model regression check with Studio already running, run `python tests/chat_integration.py`. It checks the pelican SVG prompt, tool-call/result continuation, streaming parity, output limits, reasoning, and disconnect cancellation. Outputs are saved under `benchmarks/chat-integration`.
+| Workload | Acceleration | Input / output tokens | Decode tps: median [range] | Client first response ms | Total s | Runs |
+| --- | --- | --- | --- | --- | --- | --- |
+| prose | Speculation off | 101 / 256 | 25.7 [25.7–26.6] | 297.3 | 10.2 | 3/3 |
+| code generation | Speculation off | 111 / 256 | 26.9 [26.6–26.9] | 311.7 | 9.8 | 3/3 |
+| code edit | Speculation off | 152 / 74 | 27.0 [26.9–27.1] | 348.1 | 3.1 | 3/3 |
+| prose | MTP only | 101 / 256 | 36.3 [36.1–36.7] | 310.0 | 7.3 | 3/3 |
+| code generation | MTP only | 111 / 256 | 55.8 [52.4–57.2] | 337.0 | 4.9 | 3/3 |
+| code edit | MTP only | 152 / 74 | 72.2 [71.6–72.5] | 405.3 | 1.4 | 3/3 |
+| prose | MTP + lookup | 101 / 256 | 36.4 [36.2–37.0] | 306.4 | 7.3 | 3/3 |
+| code generation | MTP + lookup | 111 / 256 | 53.9 [51.5–56.7] | 359.4 | 5.0 | 3/3 |
+| code edit | MTP + lookup | 152 / 74 | 74.1 [74.0–74.9] | 394.0 | 1.3 | 3/3 |
 
-Run `python tests/tool_stream_regression.py` for the shorter real-model regression covering complete writes, truncated writes, streaming/JSON error parity, and disconnect cancellation. Outputs are saved under `benchmarks/tool-stream-regression`.
+#### 4.2 Context Depth
 
-There is also a browser dashboard served by the native engine:
+![Decode throughput versus actual occupied context](benchmark-reports/20261002-031837Z/context.svg)
 
-`http://127.0.0.1:8080/`
+| Condition | Actual input / output tokens | Decode tps: median [range] | Fresh prefill tps | Client first response ms | Runs |
+| --- | --- | --- | --- | --- | --- |
+| context-8192 | 8202 / 256 | 35.4 [35.4–37.1] | 1,289.5 | 6,479.2 | 3/3 |
+| context-32768 | 32517 / 256 | 35.0 [34.8–37.2] | 1,132.9 | 28,902.7 | 3/3 |
+| context-65536 | 65217 / 256 | 33.3 [33.1–34.9] | 1,135.5 | 57,713.4 | 3/3 |
 
-Going to `http://127.0.0.1:8080/v1` now returns API information instead of a blank-looking endpoint.
+#### 4.3 Structured Output and Sustained Generation
 
-## Use it from another project
+| Condition | Input / output tokens | Decode tps: median [range] | First response ms | Checks | Early stops |
+| --- | --- | --- | --- | --- | --- |
+| structured_json | 101 / 17, 24 | 61.3 [57.3–63.6] | 360.3 | 3/3 | 3 |
+| tool_call | 370 / 40 | 63.0 [62.9–64.2] | 1,192.7 | 3/3 | 3 |
+| sustained | 114 / 1024 | 38.6 [38.6–38.6] | 316.7 | 1/1 | 0 |
 
-Use this as the OpenAI base URL:
+Longer-generation 64-token window rates are retained in the raw results. An output shorter than 1,024 tokens is not evidence of sustained speed over 1,024 tokens.
 
-`http://127.0.0.1:8080/v1`
+#### 4.4 Conversation Continuation
 
-An API key is not required for the default loopback-only setup. Clients that require a non-empty key can use any placeholder value.
+| Request | Actual input / output tokens | Engine first token ms | Prefill ms | Total s | Notes |
+| --- | --- | --- | --- | --- | --- |
 
-Python/OpenAI example:
+Continuation is an attempt to extend the exact raw prefix. Re-tokenization or EOS can prevent reuse; the API does not expose cached-token counts, so reuse is not asserted as proven.
+
+#### 4.5 Speculation and Streaming
+
+| Condition | MTP acceptance | MTP accepted / output | Lookup accepted / output | Median longest payload gap ms |
+| --- | --- | --- | --- | --- |
+| prose-off | N/A | 0.000 | 0.000 | 42.0 |
+| code_generation-off | N/A | 0.000 | 0.000 | 39.2 |
+| code_edit-off | N/A | 0.000 | 0.000 | 38.4 |
+| prose-mtp | 69.6% | 0.441 | 0.000 | 86.1 |
+| code_generation-mtp | 78.0% | 0.750 | 0.000 | 101.6 |
+| code_edit-mtp | 91.3% | 0.851 | 0.000 | 106.0 |
+| prose-mtp_lookup | 69.6% | 0.441 | 0.000 | 81.8 |
+| code_generation-mtp_lookup | 76.9% | 0.742 | 0.000 | 103.8 |
+| code_edit-mtp_lookup | 100.0% | 0.216 | 0.662 | 150.9 |
+| context-8192 | 67.6% | 0.465 | 0.000 | 96.7 |
+| context-32768 | 69.8% | 0.520 | 0.004 | 92.7 |
+| context-65536 | 62.0% | 0.523 | 0.000 | 118.5 |
+| structured_json | 87.5% | 0.824 | 0.000 | 105.4 |
+| tool_call | 100.0% | 0.750 | 0.075 | N/A |
+| sustained | 71.9% | 0.512 | 0.000 | 106.3 |
+
+Acceptance is N/A when no proposals occurred. High acceptance alone does not establish a throughput improvement.
+
+#### 4.6 Memory and Loading
+
+| Mode | Engine load s | Sampled minimum free RAM GiB | Sampled maximum GPU local/shared GiB |
+| --- | --- | --- | --- |
+| Speculation off | 35.9 | 7.0 | 82.7 / 0.0 |
+| MTP only | 22.0 | 7.9 | 86.0 / 0.0 |
+| MTP + lookup | 22.0 | 7.6 | 86.1 / 0.0 |
+
+Memory is sampled at request boundaries, not a guaranteed peak/minimum. GPU allocations are not added to host RAM usage on this unified-memory machine. Temperatures, clock traces, board power, and physical NVMe throughput are unavailable in this suite.
+
+### 5. Correctness and Reliability
+
+JSON checks exact values; tool checks validate the simulated function and arguments; code editing compares Python ASTs; code generation checks syntax and function presence. Prose checks only a nonempty response. These are basic integrity checks, not a comprehensive quality evaluation.
+
+No measured request failed the basic integrity checks.
+
+### 6. Analysis and Limitations
+
+- Compare matching workload rows, occupied context, token caps, model hashes, sampling, and cache conditions. Model/backend changes require an explicitly labeled comparison.
+- Three repetitions support medians and ranges, not reliable tail-latency percentiles or small-gain claims. No p95/p99 request latency is inferred.
+- Capped outputs can truncate code or tasks. The speed remains measured, but a failed task check is not a useful completed answer.
+- This API benchmark includes sampling and serving. It is not a llama-bench pp/tg microbenchmark, and its rates should not be ranked directly against those numbers.
+- Modes are grouped to avoid repeated model loads. This is not an interleaved A/B experiment; temperature and clock drift can influence mode comparisons.
+- Long context uses one repository corpus and is not a broad retrieval-quality benchmark. No multi-client serving, vision, reasoning-on, or overnight stability test is included.
+- Pure GPU graph timing is not reported; completion waits cannot be assumed to be removable overhead.
+
+### 7. Reproducibility Appendix
+
+- [Raw results and effective settings](benchmark-reports/20261002-031837Z/raw-results.json)
+- [Per-request CSV](benchmark-reports/20261002-031837Z/requests.csv)
+- [Exact fixtures and context snapshots](benchmark-reports/20261002-031837Z/inputs.json)
+- Benchmark runner SHA-256: `38c1d1ed37496559e06bcebd5a2fe5d6d72d39deb0b2a7c57028d802d28533e0`
+
+<details>
+<summary>Model, sidecar, binary, and runtime fingerprints</summary>
+
+| Role | File | GiB | SHA-256 |
+| --- | --- | --- | --- |
+| target | Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf | 0.010 | `4448186216b3af4cc558bbce2c3213f01608f8f8b2e5267a9767971dd3ec8082` |
+| target | Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf | 46.435 | `3f342f1c1580473f1ee94ddd5b28206e8c07a70fa1a366f59d1d6c922919a6c9` |
+| target | Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf | 45.985 | `56758f40269cad5cd9b0d3d6fbae0f40f6d5be6de49e4ab392dbe83157d9cbd3` |
+| target | Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf | 11.258 | `753bda48b98ba4f1636134a90a967de1b2d3908a236c026e464777342e53510a` |
+| mtp | mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf | 2.595 | `5ff54097406a905cf3a724c709124ceb0e3e10235ee862298969e91c96fa96e6` |
+| engine | FlashNextVelocity.Engine.exe | 0.009 | `574440684f55b3c12a99b86bddb4ccfe3c623a2d4c44eae85063e976d388cf86` |
+| runtime | amdhip64_7.dll | 0.015 | `546fb3d6e2d2194a9526fb94ec2fd3aa5b92a48a7595f04efece80162047ef69` |
+| runtime | rocblas.dll | 0.020 | `8ecbe340d8052e5292a47b96f3c93c20767ced0032db47851b792da7039d1e0b` |
+
+</details>
+
+<details>
+<summary>Effective benchmark configuration by acceleration mode</summary>
+
+**Speculation off**
+
+```json
+{
+  "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+  "mtp": "",
+  "mmproj": "",
+  "host": "127.0.0.1",
+  "port": 18080,
+  "context": 67584,
+  "draft_max": 7,
+  "draft_confidence": 0.75,
+  "mtp_draft_vocabulary": "latin",
+  "mtp_proposal_mode": "distribution",
+  "prefill_batch": 4096,
+  "context_lookup": false,
+  "context_lookup_min_ngram": 5,
+  "context_lookup_max_ngram": 7,
+  "context_lookup_window": 32768,
+  "context_lookup_min_draft": 6,
+  "context_lookup_max_draft": 16,
+  "context_lookup_policy": "sticky",
+  "context_lookup_capacity": 16,
+  "memory_guard": true,
+  "memory_guard_min_available_gib": 3,
+  "sessions": 1,
+  "default_max_tokens": 32768,
+  "thinking": false,
+  "preserve_thinking": false,
+  "reasoning_effort": "medium",
+  "sampling": {
+    "temperature": 0.35,
+    "top_p": 0.9,
+    "top_k": 20,
+    "min_p": 0,
+    "repeat_penalty": 1,
+    "repeat_last_n": 512,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "seed": 12345
+  }
+}
+```
+
+**MTP only**
+
+```json
+{
+  "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+  "mtp": "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+  "mmproj": "",
+  "host": "127.0.0.1",
+  "port": 18080,
+  "context": 67584,
+  "draft_max": 7,
+  "draft_confidence": 0.75,
+  "mtp_draft_vocabulary": "latin",
+  "mtp_proposal_mode": "distribution",
+  "prefill_batch": 4096,
+  "context_lookup": false,
+  "context_lookup_min_ngram": 5,
+  "context_lookup_max_ngram": 7,
+  "context_lookup_window": 32768,
+  "context_lookup_min_draft": 6,
+  "context_lookup_max_draft": 16,
+  "context_lookup_policy": "sticky",
+  "context_lookup_capacity": 16,
+  "memory_guard": true,
+  "memory_guard_min_available_gib": 3,
+  "sessions": 1,
+  "default_max_tokens": 32768,
+  "thinking": false,
+  "preserve_thinking": false,
+  "reasoning_effort": "medium",
+  "sampling": {
+    "temperature": 0.35,
+    "top_p": 0.9,
+    "top_k": 20,
+    "min_p": 0,
+    "repeat_penalty": 1,
+    "repeat_last_n": 512,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "seed": 12345
+  }
+}
+```
+
+**MTP + lookup**
+
+```json
+{
+  "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+  "mtp": "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+  "mmproj": "",
+  "host": "127.0.0.1",
+  "port": 18080,
+  "context": 67584,
+  "draft_max": 7,
+  "draft_confidence": 0.75,
+  "mtp_draft_vocabulary": "latin",
+  "mtp_proposal_mode": "distribution",
+  "prefill_batch": 4096,
+  "context_lookup": true,
+  "context_lookup_min_ngram": 5,
+  "context_lookup_max_ngram": 7,
+  "context_lookup_window": 32768,
+  "context_lookup_min_draft": 6,
+  "context_lookup_max_draft": 16,
+  "context_lookup_policy": "sticky",
+  "context_lookup_capacity": 16,
+  "memory_guard": true,
+  "memory_guard_min_available_gib": 3,
+  "sessions": 1,
+  "default_max_tokens": 32768,
+  "thinking": false,
+  "preserve_thinking": false,
+  "reasoning_effort": "medium",
+  "sampling": {
+    "temperature": 0.35,
+    "top_p": 0.9,
+    "top_k": 20,
+    "min_p": 0,
+    "repeat_penalty": 1,
+    "repeat_last_n": 512,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "seed": 12345
+  }
+}
+```
+
+</details>
+
+Generated locally by `BENCHMARK-REPORT.bat`. No upload or Git publication is performed.
+
+</details>
+
+<!-- FLASHNEXT_BENCHMARKS_END -->
+
+### Sticky lookup: paired copy and edit workloads
+
+This separate qualification compares **MTP + fixed6 lookup** with **MTP + sticky lookup**, using three paired repetitions per workload, matched prompts and seeds, and alternating policy order.
+
+| Workload | Fixed6 tok/s | Sticky tok/s | Median gain |
+| --- | ---: | ---: | ---: |
+| File editing / copying | 93.8 | **109.1** | **+16.3%** |
+| Log quotation | 78.2 | **86.0** | **+10.0%** |
+| Prose control | 36.7 | 37.0 | +0.7% |
+
+**18/18 checks passed.** Paired copy outputs were identical; sticky was faster in all three file-edit pairs and all three log-quotation pairs. The run took 5.2 minutes. These are reuse-heavy workloads; they do not imply 100 tok/s for new code or better general answer quality.
+
+Reproduction data: [raw results](benchmark-reports/20261002-024932Z-lookup-policy/raw-results.json), [request CSV](benchmark-reports/20261002-024932Z-lookup-policy/requests.csv), [exact inputs](benchmark-reports/20261002-024932Z-lookup-policy/inputs.json). Lookup starts at 6 tokens and may promote to 16, using n-grams 5–7 and a 32,768-token search window.
+
+### Run your own report
+
+After building and configuring the model, stop the engine in Studio and double-click **`BENCHMARK-REPORT.bat`**. Results appear in the terminal, this README, and a timestamped archive with raw JSON/CSV, exact inputs and charts. The runner does not push results to GitHub.
+
+The standard suite has 16 conditions and 49 measured requests, plus warmups/setup. The published run took 15.4 minutes; allow roughly 20–40 minutes on similar hardware, with a default 45-minute cap. See the [benchmark guide](docs/BENCHMARKING.md) for commands and measurement definitions.
+
+## Installation
+
+### Requirements
+
+- **Windows 11 x64**, AMD `gfx1151` / Strix Halo. The measured setup is a Ryzen AI Max+ 395 with 128 GB RAM.
+- User-supplied Qwen3.8-Flash-Next GGUF weights and the shared Q8_0 MTP sidecar. Model weights are not included.
+- Internet access for the first source build and sufficient SSD space for the model, downloaded SDKs and build output.
+
+### Build and launch
+
+1. Clone the repository to a short path:
+
+   ```bat
+   git clone https://github.com/HoodieRat/FlashNextVelocity.git C:\FlashNextVelocity
+   cd /d C:\FlashNextVelocity
+   ```
+
+2. Double-click **`BUILD.bat`**. The bootstrap installs the required build tools, downloads the pinned Windows ROCm `gfx1151` SDK and dependencies, then builds the desktop app and native engine into `dist\`. First-time tool installation may require administrator approval or a restart.
+3. Double-click **`RUN.bat`**, then open **Settings** to select the model and MTP files:
+
+   | Setting | File |
+   | --- | --- |
+   | Model | `Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf` |
+   | MTP | `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf` |
+   | Vision (optional) | Compatible F16/BF16 Qwen3.8 Flash-Next vision sidecar |
+
+   Keep **all four model shards** together. Studio also searches `C:\FlashNextModels` on first launch.
+4. Choose **Save + Restart Engine**. Use the desktop dashboard, tray menu or browser dashboard at `http://127.0.0.1:8080/`.
+
+The build uses MSVC 14.44, .NET 8, CMake/Ninja, vcpkg and AMD's Windows ROCm 10.0.0 package. Dependencies and prepared source are cached for repeat builds. Existing settings are preserved. When a model is already configured, the normal build also runs its runtime acceptance checks.
+
+Closing the dashboard minimizes it to the tray. Choose **Exit** in the tray menu to close the app and stop its engine.
+
+## Features and defaults
+
+- Desktop settings, tray controls, persistent logs and browser Quick Chat.
+- OpenAI-compatible text, streaming, reasoning and tool-call endpoints.
+- MTP speculation and sticky context lookup, with request metrics and profiling controls.
+- Optional vision input through a compatible sidecar.
+- Editable agent instructions and thinking presets.
+
+Fresh installs and **Restore Default** use the following profile. Existing saved settings take precedence.
+
+| Setting | Default |
+| --- | --- |
+| Context capacity | 32,768 tokens |
+| MTP | Shared Q8_0, distribution proposal, Latin vocabulary |
+| Draft limit / confidence | 7 / 0.75 |
+| Prefill batch | 4,096 |
+| Lookup | Sticky; 6 → 16 tokens; n-grams 5–7; search window 32,768 |
+| Sampling | Temperature 0.35; top-p 0.9; top-k 20; min-p 0 |
+| Penalties | Repeat 1; repeat window 512; frequency/presence 0 |
+
+Engine settings apply through **Save + Restart Engine**. Agent instructions apply through **Save + Apply**. Thinking presets fill the controls before saving. **Preserve Thinking** retains supplied reasoning history; external clients must retain and resend `reasoning_content` to use it.
+
+## API
+
+Use **`http://127.0.0.1:8080/v1`** as the OpenAI base URL. The default loopback setup does not require an API key; clients requiring one can use `local`.
 
 ```python
 from openai import OpenAI
@@ -116,93 +468,27 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-Supported server routes:
+| Route | Purpose |
+| --- | --- |
+| `GET /`, `GET /dashboard` | Browser dashboard |
+| `GET /health`, `GET /metrics` | Engine status and metrics |
+| `GET /v1`, `GET /v1/models` | API and model discovery |
+| `POST /v1/chat/completions` | Text, streaming, reasoning, tools and optional images |
+| `POST /v1/completions` | Raw text completion |
 
-- `GET /`
-- `GET /dashboard`
-- `GET /health`
-- `GET /metrics`
-- `GET /v1`
-- `GET /v1/models`
-- `POST /v1/chat/completions`
-- `POST /v1/completions`
+## Credits and licensing
 
-Chat supports ordinary text, streaming SSE, Qwen reasoning controls, tool schemas/calls, and OpenAI-style `image_url` content when a vision sidecar is configured.
+FlashNextVelocity is a separate project. Its native engine incorporates the Windows Gufo source base and upstream kernel work; those contributions retain their original authorship and licenses.
 
-## Runtime fixes integrated into the source build
+| Source | Role in this project | Notices |
+| --- | --- | --- |
+| [Gufo](https://github.com/gufo-org/gufo) / [pixmaate Windows port](https://github.com/pixmaate/gufo) | Incorporated inference base, tokenizer/templates, model/vision support and HIP execution; project changes are integrated through the Windows preparation and source overlay | [MIT license](licenses/gufo/LICENSE), [upstream notice](licenses/gufo/NOTICE) |
+| [llama.cpp / ggml](https://github.com/ggml-org/llama.cpp) | Adapted quantized HIP/MMQ kernels inherited through that base | [MIT notice](licenses/gufo/imported/llama.cpp.txt), [kernel provenance](gufo-overlay/src/models/qwen38_flash_next/kernels/rocm/mmq/VENDOR.md) |
+| [Qwen](https://github.com/QwenLM) | Reference model/tokenizer/chat-template work identified by upstream | [Apache 2.0 notice](licenses/gufo/imported/qwen.txt); model files have their own terms |
+| [AMD ROCm / TheRock](https://github.com/ROCm/TheRock) | Windows HIP SDK and runtime | [Retained SDK notices](licenses/runtime/rocm) |
+| ICU, OpenSSL, cURL, libpng, libjpeg-turbo, libspng, zlib | Runtime libraries installed through vcpkg | [Retained component notices](licenses/runtime/vcpkg) |
+| Strix/Halo implementations, Strix Alloy and Halogen | Implementation references and optimization/benchmark ideas | Source-by-source credits in [THIRD_PARTY.md](THIRD_PARTY.md) |
 
-There is no numbered patch chain. `BUILD.bat` checks out the exact pinned Gufo source and runs one deterministic source-preparation step containing the Windows platform integration:
+Project-owned code is licensed under [MIT](LICENSE). [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md) identify incorporated sources, pins, retained notices and reference projects. Build packages include a `third-party\` directory containing those notices and the supplied dependency notices. Model weights are obtained separately under their publishers' terms.
 
-- Windows GGUF memory mapping.
-- Windows direct/overlapped PLE and weight-loading I/O.
-- Winsock image networking.
-- Windows plan-database locking/publication.
-- removal of Linux-only THP calls.
-- Windows LLP64 JSON overload fix.
-- hipBLAS fallback for prompt projection shapes for which Windows hipBLASLt has no valid zero-workspace plan.
-- complete F16 mmproj conversion into Gufo's BF16/F32 working representation during lazy vision upload, including matrix weights, patch embeddings, norms, biases and positional tensors.
-
-The upstream BF16 mmproj path remains native. F16 is enabled when explicitly configured; a blank `mmproj` remains genuinely vision-off.
-
-## Files that matter after build
-
-Runtime files are under `dist\`:
-
-- `dist\FlashNextVelocity.exe`
-- `dist\config.json`
-- `dist\runtime.json`
-- `dist\engine\FlashNextVelocity.Engine.exe`
-- `dist\logs\`
-- `dist\benchmarks\`
-
-The source/dependency/build trees can remain in place because the local ROCm runtime and model engine use them for runtime library locations.
-
-## Licensing
-
-Gufo is MIT licensed and pinned to the commit listed in `VERSION.json`. See `THIRD_PARTY.md` and `LICENSE`.
-
-
-
-## v1.0.5 native speculative integration
-
-This release adds a Windows-native prompt/context lookup proposal lane beside MTP. When the newly sampled target token completes a strong n-gram already present in committed context, Studio copies the historical continuation as a speculative proposal and verifies it through the existing Gufo target/rollback path. The MTP recurrent block still receives a headless catch-up so its state remains valid, but its proposal/output-head work is skipped for that lookup-selected cycle. If no qualifying match exists, generation falls through to the normal MTP path. Lookup width is independent of the MTP length learner because the two proposal sources have different costs.
-
-Sampled decoding remains distribution-correct: each lookup token is represented as a deterministic one-hot proposal distribution and is passed through the same target p/q rejection plus residual-correction verifier used by sampled MTP. Lookup outcomes do not train the MTP draft-length policy. Metrics separately report MTP and lookup drafted/accepted counts and prefix survival.
-
-A configurable Windows memory floor is also checked before/after model load, at request start, and periodically during generation. The guard checks both available physical RAM and commit headroom; the default floor is 8 GiB. It is a safety guard only; it does not change VGM or expose additional VRAM.
-
-The integration is fully native Windows. No WSL2, DXG bridge, Linux `/proc`/`mmap` hooks, acceptance-EMA draft controller, experimental reduced-vocabulary MTP conversion, or no-gain 512-expert routing patch is imported.
-
-## v1.0.4 ROCm ownership / hipBLASLt fix
-
-Studio now owns `.deps\rocm` inside the project. `RUN.bat` performs a one-time migration from an older ROCm install when needed. The hipBLASLt environment is pointed at the architecture-specific `bin\hipblaslt\library\gfx1151` directory, where `TensileLibrary_lazy_gfx1151.*` and gfx1151 code objects live.
-
-## v1.0.6: sampled-MTP recovery mode
-
-`mtp_proposal_mode` is now explicit. `halo_greedy` restores the deterministic MTP-top-token proposal semantics used by the preserved high-acceptance halo-box runtime while keeping target sampling exact; `distribution` retains Gufo's stochastic Top-256 p/q proposal path for A/B testing. `prefill_batch` controls the real Gufo native prefill `max_batch` (default 2048), not a fake llama.cpp-style ubatch. See `OPTIMIZATION-PASS-v1.0.6.md` for the source-level finding and recommended comparison.
-
-## v1.0.8: adaptive exact target-verification shortlist
-
-The sampled target verifier now selects the smallest exact raw shortlist that safely contains the request's top-k support: Top-64 for the default `top_k=40`, Top-128 for `64..127`, Top-256 for `128..255`, and the existing full-vocabulary path when compact verification cannot be certified. The strict support certificate, exact target RNG stream, rollback behavior, and synchronized full final frontier are preserved.
-
-Studio-generated chat and benchmark responses are also checked against the engine's request-effective settings. If thinking, reasoning effort, sampling, draft, proposal, prefill, context-lookup, or context values do not match what the UI sent, Studio raises a mismatch instead of silently presenting a setting that was not actually applied.
-
-See `OPTIMIZATION-PASS-v1.0.8.md` and `VALIDATION-v1.0.8.txt`.
-
-## v1.0.9: restore trained MTP hyper-connection normalization
-
-The Qwen3.8 Flash-Next MTP hidden handoff is now RMS-normalized independently per hyper-connection stream, matching the preserved high-acceptance Halo/Strix implementation and the head's row-wise hidden projection. The previous Gufo path normalized the entire HC*hidden row with one shared RMS scale, coupling streams before `nextn_fc_hidden` and changing the MTP proposal distribution.
-
-The fix is applied to both single-session and batched ROCm MTP execution. The build overlay also patches Gufo's optional scalar reference oracle to the same geometry, and `BUILD.bat` rejects a source tree where any of those paths regress to whole-row normalization. v1.0.8's adaptive Top-64/128/256 exact target verification remains intact.
-
-Benchmark telemetry now reports `MTP hidden normalization: per-HC-stream`.
-
-See `MTP-HC-GROUPNORM-v1.0.9.md` and `VALIDATION-v1.0.9.txt`.
-
-## GitHub benchmark report
-
-Run **`BENCHMARK-REPORT.bat`** for a bounded text benchmark: 16 conditions covering prose, code generation, code editing, acceleration modes, occupied context, JSON/tools, conversation continuation, and longer generation. Stop the normal engine in Studio first; the runner uses three sequential launches with temporary configuration copies.
-
-The default 45-minute limit includes loading and model fingerprinting. Results appear in the terminal and in [BENCHMARK-REPORT.md](BENCHMARK-REPORT.md), with charts, input snapshots, JSON, and CSV in the corresponding `benchmark-reports/` run folder. Commit both the report and its linked run folder to display everything on GitHub.
-
-See [Benchmarking guide](docs/BENCHMARKING.md) for methodology, options, comparison rules, and report recovery. `BENCHMARK-REPORT.bat --plan` previews the report without loading the model.
+Implementation notes: [native MTP normalization](MTP-HC-GROUPNORM-v1.0.9.md), [v1.0.10 inference work](OPTIMIZATION-PASS-v1.0.10.md).

@@ -593,6 +593,84 @@ def make_chart(path, title, labels, values, colors=None):
     path.write_text('\n'.join(elements), encoding='utf-8')
 
 
+def readme_benchmark_section(data, prefix):
+    """Keep the primary GitHub results on the repository landing page."""
+    summaries = data.get('summaries', [])
+    successful = [r for r in data.get('runs', [])
+                  if r.get('purpose') == 'measured' and r.get('status') == 'ok']
+    by_id = {s['id']: s for s in summaries}
+    meta = data['metadata']
+    machine = meta.get('machine', {})
+    source = meta.get('source_config', {})
+    rows = []
+    for kind, label in (('prose', 'Prose'), ('code_generation', 'Code generation'),
+                        ('code_edit', 'Small code edit')):
+        lengths = sorted({n for mode in ('off', 'mtp', 'mtp_lookup')
+                          for n in by_id.get(kind + '-' + mode, {}).get('output_tokens', [])})
+        rows.append([label, ', '.join(map(str, lengths)) or 'N/A']
+                    + [fmt(by_id.get(kind + '-' + mode, {}).get('decode_tps'))
+                               for mode in ('off', 'mtp', 'mtp_lookup')])
+    lines = [f'### Text generation · {data["started_utc"].split("T")[0]} (UTC)', '',
+             f'**{data["status"].upper()}** · '
+             f'{sum(s["status"] == "complete" for s in summaries)}/{len(data["cases"])} conditions · '
+             f'{len(successful)}/{data["planned_measured_requests"]} measured requests · '
+             f'{sum(r.get("check") == "PASS" for r in successful)}/{len(successful)} basic checks passed · '
+             f'{fmt(data.get("elapsed_seconds", 0) / 60)} minutes.', '',
+             'Median decode throughput in **tokens/second**. Each standard condition has '
+             f'{meta["repetitions"]} planned repetitions; natural early stops are retained.', '',
+             table(['Workload', 'Output tokens', 'Speculation off', 'MTP', 'MTP + lookup'], rows), '',
+             f'![Decode throughput by workload]({prefix}workloads.svg)', '',
+             '### Long context', '',
+             table(['Actual input tokens', 'Decode tok/s', 'Prefill tok/s', 'Client time to first token (s)'],
+                   [[', '.join(f'{n:,}' for n in s['prompt_tokens']) or 'N/A',
+                     fmt(s['decode_tps']), fmt(s['prefill_tps']),
+                     fmt(s['client_ttft_ms'] / 1000) if s.get('client_ttft_ms') is not None else 'N/A']
+                    for s in summaries if s['kind'] == 'context']), '',
+             f'![Decode throughput by occupied context]({prefix}context.svg)', '',
+             '### Measurement context', '',
+             f'- **Hardware:** {machine.get("cpu", "Unavailable").strip()}; '
+             f'{fmt(machine.get("ram_bytes", 0) / GIB)} GiB RAM; '
+             f'{machine.get("os", "Unavailable")}.',
+             f'- **Model:** `{source.get("model", "Unavailable")}`; '
+             f'MTP `{source.get("mtp", "Unavailable")}`.',
+             f'- **Backend:** FlashNextVelocity / native ROCm HIP / gfx1151; '
+             f'context capacity {meta.get("context_capacity", 0):,} tokens.',
+             '- **Method:** one client, grouped acceleration modes, profiling/thinking/vision off. '
+             'Decode rates are engine telemetry; time to first token is measured by the client. '
+             'Detailed ranges, output lengths, latency, configuration and fingerprints are below.',
+             '- **Interpretation:** basic task checks are not a comprehensive coding-quality evaluation. '
+             'Compare matching prompts, output lengths, sampling, context and model files.', '']
+    if data.get('errors'):
+        lines += ['**Unfinished conditions:**', ''] + [f'- {cell(e)}' for e in data['errors']] + [
+            '', 'This remains a partial result; passing checks cover completed requests only.', '']
+    lines += [f'Reproduction data: [raw JSON]({prefix}raw-results.json), '
+              f'[request CSV]({prefix}requests.csv), [exact inputs]({prefix}inputs.json).', '',
+              '<details>', '<summary>Full benchmark report: methodology, latency, checks and reproducibility</summary>', '']
+    # Heading levels are scoped under the README's Benchmarks section.
+    for line in markdown_report(data, prefix).splitlines()[2:]:
+        lines.append('#' + line if line.startswith('##') else line)
+    lines += ['', '</details>']
+    return '\n'.join(lines)
+
+
+def publish_readme_benchmarks(data, prefix):
+    # A preview or failed startup must not replace existing measured results.
+    if not any(r.get('purpose') == 'measured' and r.get('status') == 'ok'
+               for r in data.get('runs', [])):
+        return
+    path = ROOT / 'README.md'
+    start, end = '<!-- FLASHNEXT_BENCHMARKS_START -->', '<!-- FLASHNEXT_BENCHMARKS_END -->'
+    if not path.is_file():
+        return
+    text = path.read_text(encoding='utf-8')
+    if text.count(start) != 1 or text.count(end) != 1:
+        return
+    before, rest = text.split(start, 1)
+    _, after = rest.split(end, 1)
+    path.write_text(before + start + '\n\n' + readme_benchmark_section(data, prefix)
+                    + '\n\n' + end + after, encoding='utf-8')
+
+
 def markdown_report(data, prefix=''):
     summaries, runs = data.get('summaries', []), data.get('runs', [])
     meta = data['metadata']
@@ -643,7 +721,7 @@ def markdown_report(data, prefix=''):
                      ['RAM configured speed', (', '.join(map(str, machine.get('ram_mt_s', []))) + ' MT/s') if machine.get('ram_mt_s') else 'Unavailable'],
                      ['GPU / driver', '; '.join(f'{g.get("Name")} / {g.get("DriverVersion")}' for g in machine.get('gpu', [])) or 'Unavailable'],
                      ['Power plan', machine.get('power_plan', 'Unavailable')],
-                     ['Backend', 'Native Gufo / ROCm HIP / gfx1151'],
+                     ['Backend', 'FlashNextVelocity / ROCm HIP / gfx1151'],
                      ['Loaded HIP runtime file version', ', '.join(sorted({module.get('file_version') or 'Unavailable'
                          for mode in data.get('modes', []) for module in mode.get('runtime_modules', [])
                          if module.get('module', '').lower().startswith('amdhip')})) or 'Unavailable'],
@@ -971,6 +1049,7 @@ class Suite:
         (self.out / 'README.md').write_text(markdown_report(self.data), encoding='utf-8')
         prefix = os.path.relpath(self.out, ROOT).replace('\\', '/') + '/'
         (ROOT / 'BENCHMARK-REPORT.md').write_text(markdown_report(self.data, prefix), encoding='utf-8')
+        publish_readme_benchmarks(self.data, prefix)
         print('\n' + '=' * 86 + '\nBENCHMARK SUMMARY\n' + '=' * 86, flush=True)
         print(f'{"Condition":29} {"Median tps":>12} {"Range":>17} {"Runs":>7} {"Checks":>8}')
         for summary in summaries:
@@ -978,7 +1057,7 @@ class Suite:
             print(f'{summary["id"]:29} {fmt(summary["decode_tps"]):>12} {spread:>17} '
                   f'{summary["completed"]:>3}/{summary["planned"]:<3} {summary["check_passes"]:>3}/{summary["completed"]:<3}')
         print(f'\nStatus: {self.data["status"]}; elapsed {self.data["elapsed_seconds"] / 60:.1f} min')
-        print(f'GitHub report: {ROOT / "BENCHMARK-REPORT.md"}\nRun folder: {self.out}', flush=True)
+        print(f'GitHub landing page: {ROOT / "README.md"}\nStandalone report: {ROOT / "BENCHMARK-REPORT.md"}\nRun folder: {self.out}', flush=True)
 
     def run_mode(self, mode):
         config = copy.deepcopy(self.source_config)

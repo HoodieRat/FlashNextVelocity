@@ -41,7 +41,7 @@ Ratios describe observed throughput in this grouped run. Consult correctness res
 | RAM configured speed | 8000 MT/s |
 | GPU / driver | Microsoft Remote Display Adapter / 10.0.26100.9278; AMD Radeon(TM) 8060S Graphics / 32.0.31041.1004 |
 | Power plan | Power Scheme GUID: e6bdbc32-f927-41a8-aff4-93df4fd4484c  (Ultimate Performance) |
-| Backend | Native Gufo / ROCm HIP / gfx1151 |
+| Backend | FlashNextVelocity / ROCm HIP / gfx1151 |
 | Loaded HIP runtime file version | 10.0.3581.0 |
 | Engine runtime revision | fnv-mtp-cache-replay-v13 |
 | Git commit | b58deeb81e19b250222fe259d223339c8634543a |
